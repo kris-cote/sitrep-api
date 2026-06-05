@@ -13,7 +13,7 @@ from app.routes.challenge_alignment import router as challenge_alignment_router
 from app.routes.provenance import router as provenance_router
 # Optional: if you are exposing /metrics via prometheus_fastapi_instrumentator
 from prometheus_fastapi_instrumentator import Instrumentator
-
+from app.routes import compliance
 app = FastAPI(
     title="Situational Awareness API",
     version="1.0.0",
@@ -52,3 +52,4 @@ app.include_router(satellite_router, prefix="/api/v1/satellite", tags=["satellit
 app.include_router(readiness_router, prefix="/api/v1/readiness", tags=["readiness"])
 app.include_router(readiness_router, prefix="/api/v1/readiness", tags=["readiness"])
 app.include_router(challenge_alignment_router)
+app.include_router(compliance.router)
