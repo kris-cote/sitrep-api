@@ -1,0 +1,74 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1"/>
+  <title>Space Hub — Sit-Rep</title>
+  <style>
+    body{font-family:system-ui,Arial;margin:20px;max-width:1100px}
+    .row{display:flex;gap:16px;flex-wrap:wrap}
+    .card{border:1px solid #ddd;border-radius:12px;padding:14px;flex:1;min-width:280px}
+    .big{font-size:28px;font-weight:700}
+    .pill{display:inline-block;padding:4px 10px;border-radius:999px;border:1px solid #ccc;margin-left:8px}
+    img{max-width:100%;border-radius:12px;border:1px solid #eee}
+    pre{white-space:pre-wrap;background:#f6f6f6;padding:10px;border-radius:10px;border:1px solid #eee}
+  </style>
+</head>
+<body>
+  <h1>Space Hub — Sit-Rep</h1>
+
+  <div class="row">
+    <div class="card">
+      <div class="big" id="decision">Loading…</div>
+      <div id="meta"></div>
+      <h3>Reasons</h3>
+      <div id="reasons"></div>
+    </div>
+
+    <div class="card">
+      <h3>Latest GOES (PNW)</h3>
+      <img id="goesImg" alt="GOES latest"/>
+      <div id="goesMeta"></div>
+    </div>
+  </div>
+
+  <h3>Raw JSON</h3>
+  <pre id="raw"></pre>
+
+<script>
+const API = (location.hostname.includes("api.") ? "" : "http://localhost:9000") + "/api/v1";
+const spaceport_id = "canso";
+const area_id = "bc";
+const sector = "pnw";
+
+function esc(s){ return (""+s).replace(/[&<>]/g, c=>({ "&":"&amp;","<":"&lt;",">":"&gt;" }[c])); }
+
+async function load() {
+  // Sitrep (you can point this at /launchcorridor/decision if you prefer)
+  const decisionUrl = `${API}/launchcorridor/decision?spaceport_id=${spaceport_id}&area_id=${area_id}`;
+  const d = await fetch(decisionUrl).then(r=>r.json());
+
+  document.getElementById("decision").textContent = `${d.go_nogo} (conf ${d.confidence})`;
+  document.getElementById("meta").innerHTML = `<div><b>${esc(d.spaceport_id)}</b> / <b>${esc(d.area_id)}</b> · ${esc(d.timestamp)}</div>`;
+
+  document.getElementById("reasons").innerHTML = (d.reasons||[]).map(r =>
+    `<div><b>${esc(r.signal)}</b> <span class="pill">${esc(r.status)}</span><div>${esc(r.detail||"")}</div></div><hr/>`
+  ).join("");
+
+  document.getElementById("raw").textContent = JSON.stringify(d, null, 2);
+
+  // GOES
+  const goesMetaUrl = `${API}/satellite/goes/latest.json?sector=${sector}`;
+  const gm = await fetch(goesMetaUrl).then(r=>r.json());
+  document.getElementById("goesMeta").innerHTML = `<div>Status: <b>${esc(gm.status)}</b> · Fetched: ${esc(gm.fetched_at||"n/a")}</div>`;
+  document.getElementById("goesImg").src = `${API}/satellite/goes/latest.jpg?sector=${sector}&_=${Date.now()}`;
+}
+
+load().catch(err=>{
+  document.getElementById("decision").textContent = "ERROR";
+  document.getElementById("raw").textContent = String(err);
+});
+</script>
+</body>
+</html>
+
