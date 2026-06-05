@@ -1,4 +1,5 @@
 from datetime import datetime, timezone, timedelta
+import json
 from sqlalchemy import text
 from fastapi import APIRouter, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -8,6 +9,7 @@ from app.db.observations import insert_observation
 from app.db.tracking import associate_observation_to_entity
 from app.db.fusion import create_fusion_output_with_provenance
 from app.db.operator_actions import create_operator_action_for_entity
+from app.services.compliance_engine import evaluate_compliance, decision_to_dict
 
 
 router = APIRouter(prefix="/api/v1/demo", tags=["demo"])
@@ -746,4 +748,231 @@ async def create_airborne_track_demo(
             "lineage": f"/api/v1/entities/{entity_id}/lineage",
             "operator_actions": f"/api/v1/entities/{entity_id}/operator-actions",
         },
+    }
+
+@router.post("/compliance-fusion")
+async def demo_compliance_fusion(
+    tenant_id: str = "fce_demo",
+    confirm: bool = False,
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    SitRep-FCE demo scenario.
+
+    Demonstrates a modular compliance layer sitting between raw multi-sensor
+    ingestion and downstream fusion analytics.
+
+    Synthetic inputs:
+    - radar / UNCLASSIFIED / open_network -> permit
+    - EO/IR / PROTECTED_A / protected_a_network -> redact
+    - SIGINT / PROTECTED_B / mission_network -> review_required / restricted
+    """
+
+    if not confirm:
+        return {
+            "status": "confirmation_required",
+            "message": "Set confirm=true to run the SitRep-FCE compliance fusion demo.",
+            "example": f"/api/v1/demo/compliance-fusion?tenant_id={tenant_id}&confirm=true",
+        }
+
+    synthetic_inputs = [
+        {
+            "source_system": "radar_sim",
+            "source_type": "radar",
+            "classification_in": "UNCLASSIFIED",
+            "security_domain_in": "open_network",
+            "requested_output_domain": "operator_console",
+            "metadata": {
+                "sensor_role": "primary track cue",
+                "object_type": "vessel",
+                "example_payload": {
+                    "track_id": "RAD-FCE-001",
+                    "latitude": 49.167,
+                    "longitude": -123.932,
+                    "confidence": 0.84,
+                },
+            },
+        },
+        {
+            "source_system": "eo_ir_sim",
+            "source_type": "eo_ir",
+            "classification_in": "PROTECTED_A",
+            "security_domain_in": "protected_a_network",
+            "requested_output_domain": "operator_console",
+            "metadata": {
+                "sensor_role": "visual confirmation cue",
+                "object_type": "vessel",
+                "example_payload": {
+                    "image_chip_id": "EOIR-FCE-001",
+                    "sensitive_fields": ["raw_image_reference", "operator_notes"],
+                    "confidence": 0.79,
+                },
+            },
+        },
+        {
+            "source_system": "sigint_sim",
+            "source_type": "sigint",
+            "classification_in": "PROTECTED_B",
+            "security_domain_in": "mission_network",
+            "requested_output_domain": "operator_console",
+            "metadata": {
+                "sensor_role": "protected RF/SIGINT cue",
+                "object_type": "vessel",
+                "example_payload": {
+                    "emitter_id": "SIG-FCE-001",
+                    "frequency_band": "synthetic",
+                    "sensitive_fields": ["emitter_signature", "collection_method"],
+                    "confidence": 0.86,
+                },
+            },
+        },
+    ]
+
+    decisions = []
+    compliance_summary = {}
+
+    for item in synthetic_inputs:
+        decision = evaluate_compliance(
+            source_system=item["source_system"],
+            source_type=item["source_type"],
+            classification_in=item["classification_in"],
+            security_domain_in=item["security_domain_in"],
+            requested_output_domain=item["requested_output_domain"],
+            output_audience="operator_console",
+            metadata=item["metadata"],
+        )
+
+        decision_dict = decision_to_dict(decision)
+
+        result = await db.execute(
+            text(
+                """
+                INSERT INTO compliance_audit_logs (
+                    tenant_id,
+                    policy_id,
+                    policy_version,
+                    rule_id,
+                    source_system,
+                    source_type,
+                    classification_in,
+                    classification_out,
+                    security_domain_in,
+                    requested_output_domain,
+                    enforcement_action,
+                    compliance_disposition,
+                    reason,
+                    human_readable_decision,
+                    machine_readable_policy,
+                    evidence
+                )
+                VALUES (
+                    :tenant_id,
+                    :policy_id,
+                    :policy_version,
+                    :rule_id,
+                    :source_system,
+                    :source_type,
+                    :classification_in,
+                    :classification_out,
+                    :security_domain_in,
+                    :requested_output_domain,
+                    :enforcement_action,
+                    :compliance_disposition,
+                    :reason,
+                    :human_readable_decision,
+                    CAST(:machine_readable_policy AS jsonb),
+                    CAST(:evidence AS jsonb)
+                )
+                RETURNING id, created_at
+                """
+            ),
+            {
+                "tenant_id": tenant_id,
+                "policy_id": decision.policy_id,
+                "policy_version": decision.policy_version,
+                "rule_id": decision.rule_id,
+                "source_system": decision.source_system,
+                "source_type": decision.source_type,
+                "classification_in": decision.classification_in,
+                "classification_out": decision.classification_out,
+                "security_domain_in": decision.security_domain_in,
+                "requested_output_domain": decision.requested_output_domain,
+                "enforcement_action": decision.enforcement_action,
+                "compliance_disposition": decision.compliance_disposition,
+                "reason": decision.reason,
+                "human_readable_decision": decision.human_readable_decision,
+                "machine_readable_policy": json.dumps(decision.machine_readable_policy),
+                "evidence": json.dumps(decision.evidence),
+            },
+        )
+
+        row = result.mappings().one()
+
+        action = decision.enforcement_action
+        compliance_summary[action] = compliance_summary.get(action, 0) + 1
+
+        if action == "permit":
+            downstream_action = "allowed_to_fusion_pipeline"
+        elif action == "redact":
+            downstream_action = "allowed_to_fusion_pipeline_after_redaction"
+        elif action == "segregate":
+            downstream_action = "segregated_from_requested_output_domain"
+        elif action == "review_required":
+            downstream_action = "held_for_review_before_release_or_cross_domain_fusion"
+        else:
+            downstream_action = "restricted"
+
+        decisions.append(
+            {
+                "audit_log_id": str(row["id"]),
+                "audit_created_at": row["created_at"].isoformat(),
+                "source_system": item["source_system"],
+                "source_type": item["source_type"],
+                "classification_in": item["classification_in"],
+                "security_domain_in": item["security_domain_in"],
+                "requested_output_domain": item["requested_output_domain"],
+                "enforcement_action": decision.enforcement_action,
+                "compliance_disposition": decision.compliance_disposition,
+                "rule_id": decision.rule_id,
+                "human_readable_decision": decision.human_readable_decision,
+                "downstream_fusion_action": downstream_action,
+                "decision": decision_dict,
+            }
+        )
+
+    await db.commit()
+
+    return {
+        "status": "ok",
+        "scenario": "sitrep_fce_compliance_fusion",
+        "tenant_id": tenant_id,
+        "description": (
+            "Synthetic SitRep-FCE scenario demonstrating policy-aware compliance enforcement "
+            "between raw multi-sensor ingestion and downstream fusion analytics."
+        ),
+        "input_modalities": ["radar", "eo_ir", "sigint"],
+        "classification_levels_demonstrated": [
+            "UNCLASSIFIED",
+            "PROTECTED_A",
+            "PROTECTED_B",
+        ],
+        "security_domains_demonstrated": [
+            "open_network",
+            "protected_a_network",
+            "mission_network",
+            "operator_console",
+        ],
+        "requested_output_domain": "operator_console",
+        "compliance_summary": compliance_summary,
+        "decisions": decisions,
+        "audit_urls": {
+            "audit_log": f"/api/v1/compliance/audit?tenant_id={tenant_id}",
+            "audit_export": f"/api/v1/compliance/audit/export?tenant_id={tenant_id}",
+        },
+        "important_non_claims": [
+            "Prototype uses synthetic unclassified demonstration data.",
+            "Prototype models Protected B-style policy conditions but is not an accredited Protected B system.",
+            "Prototype does not perform real classified downgrade.",
+            "Prototype does not replace authorized release authorities.",
+        ],
     }
