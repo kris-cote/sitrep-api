@@ -1,16 +1,9 @@
-import os
-
 from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, AsyncSession
 
+from app.core.database_url import async_database_url
 
-DATABASE_URL = os.getenv(
-    "DATABASE_URL",
-    "postgresql+asyncpg://hub:hub@hub-postgres:5432/hub"
-)
 
-# If the environment gives us a normal postgres URL, convert it for async SQLAlchemy.
-if DATABASE_URL.startswith("postgresql://"):
-    DATABASE_URL = DATABASE_URL.replace("postgresql://", "postgresql+asyncpg://", 1)
+DATABASE_URL = async_database_url()
 
 engine = create_async_engine(
     DATABASE_URL,
