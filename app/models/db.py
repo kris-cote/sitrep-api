@@ -11,7 +11,7 @@ engine = create_engine(sync_database_url(), echo=False)
 def init_db() -> None:
     """Create SQLModel-managed tables if they do not already exist."""
     # Import models before create_all so their metadata is registered.
-    from app.models import decision, dependency, exposure, infrastructure, resource_capability, resource_allocation, situation  # noqa: F401
+    from app.models import ai_provenance, decision, dependency, exposure, infrastructure, resource_capability, resource_allocation, situation  # noqa: F401
 
     SQLModel.metadata.create_all(engine)
 
