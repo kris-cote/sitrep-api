@@ -11,13 +11,15 @@ from app.routes.entities import router as entities_router
 from app.routes.model import router as model_router
 from app.routes.challenge_alignment import router as challenge_alignment_router
 from app.routes.provenance import router as provenance_router
+from app.routes.decisions import router as decisions_router
 # Optional: if you are exposing /metrics via prometheus_fastapi_instrumentator
 from prometheus_fastapi_instrumentator import Instrumentator
 from app.routes import compliance
+
 app = FastAPI(
-    title="Situational Awareness API",
-    version="1.0.0",
-    description="Unified mission automation and awareness",
+    title="SitRep Decision Intelligence API",
+    version="2.0.0",
+    description="Unified situational awareness, fusion, provenance and human-authorized decision intelligence",
 )
 
 app.add_middleware(
@@ -30,9 +32,11 @@ app.add_middleware(
 # IMPORTANT: instrument BEFORE startup completes (or you'll hit "Cannot add middleware after an application has started")
 Instrumentator().instrument(app).expose(app, endpoint="/metrics", include_in_schema=False)
 
+
 @app.on_event("startup")
 def on_startup():
     init_db()
+
 
 # Routers
 app.include_router(core.router)
@@ -48,8 +52,8 @@ app.include_router(cop_router)
 app.include_router(demo_router)
 app.include_router(provenance_router)
 app.include_router(model_router)
+app.include_router(decisions_router)
 app.include_router(satellite_router, prefix="/api/v1/satellite", tags=["satellite"])
-app.include_router(readiness_router, prefix="/api/v1/readiness", tags=["readiness"])
 app.include_router(readiness_router, prefix="/api/v1/readiness", tags=["readiness"])
 app.include_router(challenge_alignment_router)
 app.include_router(compliance.router)
