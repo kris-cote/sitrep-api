@@ -14,14 +14,13 @@ from app.routes.provenance import router as provenance_router
 from app.routes.decisions import router as decisions_router
 from app.routes.mission_packs import router as mission_packs_router
 from app.routes.canadian_connectors import router as canadian_connectors_router
-# Optional: if you are exposing /metrics via prometheus_fastapi_instrumentator
 from prometheus_fastapi_instrumentator import Instrumentator
 from app.routes import compliance
 
 app = FastAPI(
     title="SitRep Decision Intelligence API",
-    version="2.2.0",
-    description="Unified situational awareness, fusion, provenance, Canadian public-data connectors, mission packs and human-authorized decision intelligence",
+    version="2.3.0",
+    description="Unified situational awareness, fusion, provenance, live Canadian feed ingestion, mission packs and human-authorized decision intelligence",
 )
 
 app.add_middleware(
@@ -31,7 +30,6 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-# IMPORTANT: instrument BEFORE startup completes (or you'll hit "Cannot add middleware after an application has started")
 Instrumentator().instrument(app).expose(app, endpoint="/metrics", include_in_schema=False)
 
 
@@ -40,7 +38,6 @@ def on_startup():
     init_db()
 
 
-# Routers
 app.include_router(core.router)
 app.include_router(tenants.router)
 app.include_router(missions.router)
