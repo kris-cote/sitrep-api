@@ -11,14 +11,16 @@ from app.db.tracking import associate_observation_to_entity
 from app.models.db import engine as decision_engine_db
 from app.services.decision_trigger import evaluate_decision_trigger
 from app.services.decision_workflow import create_decision_proposal_from_observation
+from app.services.situation_correlation import correlate_observation
 
 
 async def process_observation(db: AsyncSession, observation_data: Dict[str, Any]) -> Dict[str, Any]:
     """Run a normalized observation through the complete SitRep decision pipeline.
 
     The pipeline persists the observation, performs entity association and fusion,
-    evaluates whether a decision is warranted, and creates a proposal when needed.
-    It never approves or executes a consequential action.
+    correlates it into an evolving situation, evaluates whether a decision is
+    warranted, and creates a proposal when needed. It never approves or executes
+    a consequential action.
     """
     obs_id = await insert_observation(db, observation_data)
 
@@ -43,11 +45,31 @@ async def process_observation(db: AsyncSession, observation_data: Dict[str, Any]
         tenant_id=observation_data.get("tenant_id") or "default",
     )
 
+    with Session(decision_engine_db) as situation_session:
+        correlated_situation = correlate_observation(
+            session=situation_session,
+            observation_id=obs_id,
+            observation=observation_data,
+        )
+
     decision_trigger = evaluate_decision_trigger(
         observation=observation_data,
         tracking=tracking_result,
         fusion=fusion_result,
     )
+
+    # Correlated multi-source situations can elevate a routine observation into a
+    # decision-worthy change. This is explainable and still requires human review.
+    if correlated_situation.get("severity") in {"high", "critical"}:
+        decision_trigger["should_trigger"] = True
+        decision_trigger["severity"] = "high"
+        decision_trigger["reasons"] = [
+            *decision_trigger.get("reasons", []),
+            f"correlated situation severity={correlated_situation.get('severity')}",
+            f"correlated risk={correlated_situation.get('risk_score')}",
+            f"correlated urgency={correlated_situation.get('urgency_score')}",
+        ]
+        decision_trigger["next_step"] = "generate_course_of_action"
 
     decision_proposal = None
     if decision_trigger.get("should_trigger"):
@@ -59,6 +81,7 @@ async def process_observation(db: AsyncSession, observation_data: Dict[str, Any]
                 fusion=fusion_result,
                 trigger=decision_trigger,
                 mission_id=observation_data.get("mission_id"),
+                correlated_situation=correlated_situation,
             )
 
     return {
@@ -66,6 +89,7 @@ async def process_observation(db: AsyncSession, observation_data: Dict[str, Any]
         "observation_id": obs_id,
         **tracking_result,
         **fusion_result,
+        "correlated_situation": correlated_situation,
         "decision_trigger": decision_trigger,
         "decision_proposal": decision_proposal,
     }
