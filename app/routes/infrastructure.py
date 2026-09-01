@@ -20,39 +20,16 @@ from app.services.canada_infrastructure_import import (
     national_infrastructure_coverage,
 )
 from app.services.canada_rail_import import CanadaRailImportError, import_nrwn_rail
+from app.services.canada_utility_import import CanadaUtilityImportError, import_nb_utilities, utility_coverage
 
 router = APIRouter(prefix="/infrastructure", tags=["infrastructure"])
 
 PUBLIC_SOURCE_CATALOG = {
-    "canada-national-road-network": {
-        "category": "transport",
-        "subtype": "road",
-        "publisher": "Statistics Canada / GeoBase",
-        "licence": "Open Government Licence - Canada",
-        "dataset": "National Road Network (NRN)",
-        "coverage": "All provinces and territories",
-    },
-    "canada-national-railway-network": {
-        "category": "transport",
-        "subtype": "railway",
-        "publisher": "Natural Resources Canada / Transport Canada / GeoBase",
-        "licence": "Open Government Licence - Canada",
-        "dataset": "National Railway Network (NRWN)",
-        "coverage": "Provincial and territorial packages",
-    },
-    "bc-public-railway-track-line": {
-        "category": "transport",
-        "subtype": "railway",
-        "publisher": "Government of British Columbia",
-        "dataset": "Railway Track Line",
-    },
-    "bc-transmission-lines": {
-        "category": "electric",
-        "subtype": "transmission_line",
-        "publisher": "Government of British Columbia",
-        "dataset": "BC Transmission Lines",
-        "note": "SitRep importer deliberately excludes voltage attributes from the operational copy.",
-    },
+    "canada-national-road-network": {"category": "transport", "subtype": "road", "publisher": "Statistics Canada / GeoBase", "licence": "Open Government Licence - Canada", "dataset": "National Road Network (NRN)", "coverage": "All provinces and territories"},
+    "canada-national-railway-network": {"category": "transport", "subtype": "railway", "publisher": "Natural Resources Canada / Transport Canada / GeoBase", "licence": "Open Government Licence - Canada", "dataset": "National Railway Network (NRWN)", "coverage": "Provincial and territorial packages"},
+    "bc-public-railway-track-line": {"category": "transport", "subtype": "railway", "publisher": "Government of British Columbia", "dataset": "Railway Track Line"},
+    "bc-transmission-lines": {"category": "electric", "subtype": "transmission_line", "publisher": "Government of British Columbia", "dataset": "BC Transmission Lines", "note": "SitRep importer deliberately excludes voltage attributes from the operational copy."},
+    "nb-utilities": {"category": "utility", "subtype": "mixed", "publisher": "Government of New Brunswick", "dataset": "Utilities", "coverage": "Major pipelines and power lines", "licence": "Open Government Licence - New Brunswick"},
 }
 
 
@@ -82,14 +59,13 @@ def canada_coverage():
     return national_infrastructure_coverage()
 
 
+@router.get("/coverage/canada/utilities")
+def canada_utility_coverage():
+    return utility_coverage()
+
+
 @router.post("/canada/roads/import")
-async def import_canada_roads(
-    jurisdiction: str = Query(..., min_length=2, max_length=2, description="AB, BC, MB, NB, NL, NS, NT, NU, ON, PE, QC, SK, YT"),
-    bbox: Optional[str] = Query(default=None, description="Optional minLon,minLat,maxLon,maxLat"),
-    tenant_id: str = Query(default="default", min_length=1, max_length=128),
-    limit: int = Query(default=2000, ge=1, le=2000),
-    session: Session = Depends(get_session),
-):
+async def import_canada_roads(jurisdiction: str = Query(..., min_length=2, max_length=2), bbox: Optional[str] = Query(default=None), tenant_id: str = Query(default="default"), limit: int = Query(default=2000, ge=1, le=2000), session: Session = Depends(get_session)):
     try:
         return await import_nrn_major_roads(session=session, jurisdiction=jurisdiction, tenant_id=tenant_id, bbox=bbox, limit=limit)
     except ValueError as exc:
@@ -99,12 +75,7 @@ async def import_canada_roads(
 
 
 @router.post("/canada/rail/import")
-async def import_canada_rail(
-    jurisdiction: str = Query(..., min_length=2, max_length=2, description="Province/territory code"),
-    tenant_id: str = Query(default="default", min_length=1, max_length=128),
-    limit: int = Query(default=5000, ge=1, le=5000),
-    session: Session = Depends(get_session),
-):
+async def import_canada_rail(jurisdiction: str = Query(..., min_length=2, max_length=2), tenant_id: str = Query(default="default"), limit: int = Query(default=5000, ge=1, le=5000), session: Session = Depends(get_session)):
     try:
         return await import_nrwn_rail(session=session, jurisdiction=jurisdiction, tenant_id=tenant_id, limit=limit)
     except ValueError as exc:
@@ -113,14 +84,16 @@ async def import_canada_rail(
         raise HTTPException(status_code=502, detail={"upstream": "NRCan NRWN", "error": str(exc)}) from exc
 
 
+@router.post("/canada/utilities/nb/import")
+async def import_new_brunswick_utilities(tenant_id: str = Query(default="default"), limit: int = Query(default=5000, ge=1, le=5000), session: Session = Depends(get_session)):
+    try:
+        return await import_nb_utilities(session=session, tenant_id=tenant_id, limit=limit)
+    except CanadaUtilityImportError as exc:
+        raise HTTPException(status_code=502, detail={"upstream": "Government of New Brunswick Utilities", "error": str(exc)}) from exc
+
+
 @router.post("/bc/import")
-async def import_bc_public_infrastructure(
-    datasets: str = Query(default="roads,rail,transmission", description="Comma-separated: roads,rail,transmission"),
-    bbox: str = Query(default=DEFAULT_VANCOUVER_ISLAND_BBOX, description="minLon,minLat,maxLon,maxLat; defaults to Vancouver Island region"),
-    tenant_id: str = Query(default="default", min_length=1, max_length=128),
-    limit_per_dataset: int = Query(default=1000, ge=1, le=1000),
-    session: Session = Depends(get_session),
-):
+async def import_bc_public_infrastructure(datasets: str = Query(default="roads,rail,transmission"), bbox: str = Query(default=DEFAULT_VANCOUVER_ISLAND_BBOX), tenant_id: str = Query(default="default"), limit_per_dataset: int = Query(default=1000, ge=1, le=1000), session: Session = Depends(get_session)):
     keys = [item.strip() for item in datasets.split(",") if item.strip()]
     try:
         return await import_bc_infrastructure(session=session, datasets=keys, tenant_id=tenant_id, bbox=bbox, limit_per_dataset=limit_per_dataset)
@@ -141,13 +114,7 @@ def create_infrastructure(payload: InfrastructureCreate, session: Session = Depe
 
 
 @router.get("")
-def list_infrastructure(
-    tenant_id: str = Query(default="default"),
-    category: Optional[str] = Query(default=None),
-    subtype: Optional[str] = Query(default=None),
-    limit: int = Query(default=200, ge=1, le=2000),
-    session: Session = Depends(get_session),
-):
+def list_infrastructure(tenant_id: str = Query(default="default"), category: Optional[str] = Query(default=None), subtype: Optional[str] = Query(default=None), limit: int = Query(default=200, ge=1, le=2000), session: Session = Depends(get_session)):
     statement = select(InfrastructureFeature).where(InfrastructureFeature.tenant_id == tenant_id)
     if category:
         statement = statement.where(InfrastructureFeature.category == category)
