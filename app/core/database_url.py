@@ -9,7 +9,12 @@ def raw_database_url() -> str:
     Railway normally exposes DATABASE_URL. HUB_DB_URL remains supported for
     backwards compatibility with the original Hub API configuration.
     """
-    return os.getenv("DATABASE_URL") or str(settings.hub_db_url)
+    url = os.getenv("DATABASE_URL") or settings.hub_db_url
+    if not url:
+        raise RuntimeError(
+            "No database URL configured. Set DATABASE_URL (preferred) or legacy HUB_DB_URL."
+        )
+    return str(url)
 
 
 def async_database_url() -> str:
