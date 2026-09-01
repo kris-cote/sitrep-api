@@ -35,6 +35,14 @@ def haversine_km(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
     return 2 * earth_radius_km * asin(sqrt(a))
 
 
+def _domain_for_observation(observation: Dict[str, Any]) -> str:
+    source_type = str(observation.get("source_type") or "").lower()
+    object_type = str(observation.get("object_type") or "").lower()
+    if source_type == "weather_alert" or "weather hazard" in object_type:
+        return "wildfire-emergency"
+    return select_mission_pack(observation)
+
+
 def _find_candidate(
     session: Session,
     tenant_id: str,
@@ -87,8 +95,9 @@ def _combined_scores(situation: SituationRecord, observation: Dict[str, Any], is
     if any(term in text for term in ("wildfire", "active_fire", "fire", "smoke")):
         risk = max(risk, 0.65)
         urgency = max(urgency, 0.65)
-    if any(term in text for term in ("wind", "warning", "watch", "weather alert", "storm", "heat")):
-        risk = min(1.0, max(risk, 0.55) + (0.15 if "fire" in " ".join(situation.source_types).lower() else 0.0))
+    if any(term in text for term in ("wind", "warning", "watch", "weather alert", "weather hazard", "storm", "heat")):
+        has_fire_context = any("fire" in item.lower() for item in situation.source_types)
+        risk = min(1.0, max(risk, 0.55) + (0.15 if has_fire_context else 0.0))
         urgency = min(1.0, max(urgency, 0.55) + 0.10)
     if is_new_source:
         risk = min(1.0, risk + 0.08)
@@ -116,7 +125,7 @@ def correlate_observation(
     time_window_hours: int = DEFAULT_TIME_WINDOW_HOURS,
 ) -> Dict[str, Any]:
     tenant_id = str(observation.get("tenant_id") or "default")
-    domain = select_mission_pack(observation)
+    domain = _domain_for_observation(observation)
     pack = get_mission_pack(domain)
     observed_at = _as_datetime(observation.get("collected_at"))
     latitude = observation.get("latitude")
