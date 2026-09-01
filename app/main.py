@@ -14,6 +14,7 @@ from app.routes.provenance import router as provenance_router
 from app.routes.decisions import router as decisions_router
 from app.routes.mission_packs import router as mission_packs_router
 from app.routes.canadian_connectors import router as canadian_connectors_router
+from app.routes.canadian_exposures import router as canadian_exposures_router
 from app.routes.situations import router as situations_router
 from app.routes.exposures import router as exposures_router
 from prometheus_fastapi_instrumentator import Instrumentator
@@ -56,6 +57,7 @@ app.include_router(model_router)
 app.include_router(decisions_router)
 app.include_router(mission_packs_router)
 app.include_router(canadian_connectors_router)
+app.include_router(canadian_exposures_router)
 app.include_router(situations_router)
 app.include_router(exposures_router)
 app.include_router(satellite_router, prefix="/api/v1/satellite", tags=["satellite"])
