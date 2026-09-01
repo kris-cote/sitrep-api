@@ -24,7 +24,7 @@ from app.routes.odi import router as odi_router
 from prometheus_fastapi_instrumentator import Instrumentator
 from app.routes import compliance
 
-app=FastAPI(title="SitRep Decision Intelligence API",version="3.5.0",description="Canada-wide decision intelligence with national roads, rail, communities, healthcare and population enrichment; provincial utility and emergency-response infrastructure; resource-aware COA feasibility; Statistics Canada ODI planning-context catalogue; cross-source correlation, infrastructure-impact and dependency-cascade analysis; mission packs and human authorization.")
+app=FastAPI(title="SitRep Decision Intelligence API",version="3.6.0",description="Canada-wide decision intelligence with live Statistics Canada ODI planning-context imports for airports, electric grid, telecom and potable water; national roads, rail, communities, healthcare and population enrichment; provincial utility and emergency-response infrastructure; resource-aware COA feasibility; cross-source correlation, infrastructure-impact and dependency-cascade analysis; mission packs and human authorization.")
 app.add_middleware(CORSMiddleware,allow_origins=["*"],allow_credentials=False,allow_methods=["*"],allow_headers=["*"])
 Instrumentator().instrument(app).expose(app,endpoint="/metrics",include_in_schema=False)
 @app.on_event("startup")
