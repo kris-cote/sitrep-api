@@ -6,6 +6,7 @@ from app.db.observations import insert_observation
 from app.db.tracking import associate_observation_to_entity
 from app.db.fusion import create_fusion_output_with_provenance
 from app.dependencies import get_db
+from app.services.decision_trigger import evaluate_decision_trigger
 
 
 router = APIRouter(prefix="/api/v1/observations", tags=["observations"])
@@ -16,7 +17,7 @@ async def create_observation(
     observation: ObservationCreate,
     db: AsyncSession = Depends(get_db)
 ):
-    observation_data = observation.dict()
+    observation_data = observation.model_dump()
 
     obs_id = await insert_observation(db, observation_data)
 
@@ -41,9 +42,16 @@ async def create_observation(
         tenant_id=observation_data.get("tenant_id") or "default",
     )
 
+    decision_trigger = evaluate_decision_trigger(
+        observation=observation_data,
+        tracking=tracking_result,
+        fusion=fusion_result,
+    )
+
     return {
         "status": "ok",
         "observation_id": obs_id,
         **tracking_result,
         **fusion_result,
+        "decision_trigger": decision_trigger,
     }
