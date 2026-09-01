@@ -31,7 +31,7 @@ class AIProvider:
     sovereign: bool = False
     jurisdiction: Optional[str] = None
     max_classification: str = "public"
-    request_timeout_seconds: float = 45.0
+    request_timeout_seconds: float = 60.0
     metadata: Dict[str, Any] = field(default_factory=dict)
 
     @property
@@ -84,10 +84,11 @@ def configured_providers() -> Dict[str, AIProvider]:
             provider_id="openai",
             name="OpenAI",
             base_url=os.getenv("OPENAI_BASE_URL", "https://api.openai.com/v1").rstrip("/"),
-            model=os.getenv("OPENAI_MODEL", "gpt-5"),
+            model=os.getenv("OPENAI_MODEL", "gpt-5.6-terra"),
             api_key_env="OPENAI_API_KEY",
             max_classification=os.getenv("OPENAI_MAX_CLASSIFICATION", "public"),
             jurisdiction=os.getenv("OPENAI_JURISDICTION"),
+            metadata={"recommended_role": "balanced reasoning/cost"},
         )
 
     # Generic sovereign/Canadian provider. Configure when a suitable Canadian model
@@ -209,6 +210,7 @@ def provider_catalog() -> List[Dict[str, Any]]:
             "jurisdiction": p.jurisdiction,
             "max_classification": p.max_classification,
             "enabled": p.enabled,
+            "metadata": p.metadata,
         }
         for p in configured_providers().values()
     ]
