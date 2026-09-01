@@ -24,8 +24,8 @@ from app.routes import compliance
 
 app = FastAPI(
     title="SitRep Decision Intelligence API",
-    version="2.8.0",
-    description="Unified situational awareness, cross-source correlation, exposure and wildfire screening, BC infrastructure ingestion, dependency/cascade analysis, mission packs and human-authorized decision intelligence",
+    version="2.9.0",
+    description="Unified situational awareness, Canada-wide road infrastructure ingestion, cross-source correlation, exposure and wildfire screening, infrastructure impact and dependency cascade analysis, mission packs and human-authorized decision intelligence",
 )
 
 app.add_middleware(
