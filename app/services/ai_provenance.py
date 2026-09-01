@@ -30,8 +30,18 @@ def record_ai_run(
     sovereign_required: bool = False,
     agent_version: str = "1.0",
     input_refs: Optional[List[Dict[str, Any]]] = None,
+    provider_id: Optional[str] = None,
+    model_name: Optional[str] = None,
+    evidence: Optional[List[Dict[str, Any]]] = None,
+    assumptions: Optional[List[str]] = None,
+    contradictions: Optional[List[str]] = None,
+    information_gaps: Optional[List[str]] = None,
+    confidence: Optional[float] = None,
 ) -> AIProvenanceRecord:
     analysis = response_payload.get("analysis") or response_payload.get("red_team") or response_payload
+    if not isinstance(analysis, dict):
+        analysis = {}
+    resolved_confidence = confidence if confidence is not None else analysis.get("confidence") or response_payload.get("confidence") or 0.5
     record = AIProvenanceRecord(
         tenant_id=tenant_id,
         mission_id=mission_id,
@@ -40,19 +50,19 @@ def record_ai_run(
         parent_run_id=parent_run_id,
         role=role,
         agent_version=agent_version,
-        provider_id=response_payload.get("model_provider") or analysis.get("model_provider"),
-        model_name=response_payload.get("model_name") or analysis.get("model_name"),
+        provider_id=provider_id or response_payload.get("model_provider") or analysis.get("model_provider"),
+        model_name=model_name or response_payload.get("model_name") or analysis.get("model_name"),
         data_classification=data_classification,
         sovereign_required=sovereign_required,
         prompt_fingerprint=_fingerprint(request_payload),
         input_refs=input_refs or [],
         request_payload=request_payload,
         response_payload=response_payload,
-        evidence=list(analysis.get("evidence") or []),
-        assumptions=[str(x) for x in analysis.get("assumptions") or []],
-        contradictions=[str(x) for x in analysis.get("contradictions") or []],
-        information_gaps=[str(x) for x in analysis.get("information_gaps") or response_payload.get("information_gaps") or []],
-        confidence=max(0.0, min(1.0, float(analysis.get("confidence") or response_payload.get("confidence") or 0.5))),
+        evidence=list(evidence if evidence is not None else analysis.get("evidence") or []),
+        assumptions=[str(x) for x in (assumptions if assumptions is not None else analysis.get("assumptions") or [])],
+        contradictions=[str(x) for x in (contradictions if contradictions is not None else analysis.get("contradictions") or [])],
+        information_gaps=[str(x) for x in (information_gaps if information_gaps is not None else analysis.get("information_gaps") or response_payload.get("information_gaps") or [])],
+        confidence=max(0.0, min(1.0, float(resolved_confidence))),
         advisory_only=True,
     )
     session.add(record)
