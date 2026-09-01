@@ -26,7 +26,7 @@ def create_decision_proposal_from_observation(
     if not trigger.get("should_trigger"):
         return None
 
-    pack_id = select_mission_pack(observation)
+    pack_id = str((correlated_situation or {}).get("domain") or select_mission_pack(observation))
     pack = get_mission_pack(pack_id)
     options = build_candidate_options(pack_id, observation, trigger)
 
