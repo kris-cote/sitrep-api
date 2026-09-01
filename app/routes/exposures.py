@@ -8,6 +8,7 @@ from sqlmodel import Session, select
 
 from app.models.db import get_session
 from app.models.exposure import ExposureAsset
+from app.services.bc_exposure_import import BCExposureImportError, DATASETS, import_bc_exposure_assets
 
 
 router = APIRouter(prefix="/exposures", tags=["exposures"])
@@ -58,6 +59,28 @@ def list_exposure_assets(
         statement = statement.where(ExposureAsset.asset_type == asset_type)
     statement = statement.order_by(ExposureAsset.name).limit(limit)
     return list(session.exec(statement).all())
+
+
+@router.post("/import/bc")
+async def import_bc_assets(
+    datasets: str = Query(default="municipalities,hospitals,emergency_rooms"),
+    tenant_id: str = Query(default="default", min_length=1, max_length=128),
+    limit_per_dataset: int = Query(default=1000, ge=1, le=1000),
+    session: Session = Depends(get_session),
+):
+    requested = [item.strip() for item in datasets.split(",") if item.strip()]
+    unknown = [item for item in requested if item not in DATASETS]
+    if unknown:
+        raise HTTPException(status_code=400, detail={"unknown_datasets": unknown, "available": sorted(DATASETS)})
+    try:
+        return await import_bc_exposure_assets(
+            session=session,
+            dataset_keys=requested,
+            tenant_id=tenant_id,
+            limit_per_dataset=limit_per_dataset,
+        )
+    except BCExposureImportError as exc:
+        raise HTTPException(status_code=502, detail={"upstream": "BC DataBC", "error": str(exc)}) from exc
 
 
 @router.get("/{asset_id}")
