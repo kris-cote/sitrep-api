@@ -16,6 +16,7 @@ def create_decision_proposal_from_observation(
     fusion: Dict[str, Any],
     trigger: Dict[str, Any],
     mission_id: Optional[str] = None,
+    correlated_situation: Optional[Dict[str, Any]] = None,
 ) -> Optional[Dict[str, Any]]:
     """Create a proposed decision when an explainable trigger fires.
 
@@ -28,11 +29,21 @@ def create_decision_proposal_from_observation(
     pack_id = select_mission_pack(observation)
     pack = get_mission_pack(pack_id)
     options = build_candidate_options(pack_id, observation, trigger)
+
+    if correlated_situation:
+        situation_risk = float(correlated_situation.get("risk_score") or 0.0)
+        situation_urgency = float(correlated_situation.get("urgency_score") or 0.0)
+        for option in options:
+            option["risk_score"] = max(float(option.get("risk_score", 0.0)), situation_risk)
+            option["urgency_score"] = max(float(option.get("urgency_score", 0.0)), situation_urgency)
+            option.setdefault("metadata", {})["correlated_situation"] = correlated_situation
+
     ranked = rank_courses_of_action(options, pack.get("weights"))
     flags = policy_flags(ranked)
 
     situation_id = str(
-        fusion.get("fusion_output_id")
+        (correlated_situation or {}).get("situation_id")
+        or fusion.get("fusion_output_id")
         or fusion.get("id")
         or tracking.get("entity_id")
         or observation.get("id")
@@ -63,6 +74,8 @@ def create_decision_proposal_from_observation(
             "anomaly": fusion.get("anomaly"),
         },
     ]
+    if correlated_situation:
+        evidence.append({"type": "correlated_situation", **correlated_situation})
 
     decision = DecisionRecord(
         mission_id=mission_id,
@@ -70,7 +83,7 @@ def create_decision_proposal_from_observation(
         domain=pack_id,
         title=f"Decision review: {observation.get('object_type') or 'operational anomaly'}",
         summary="; ".join(trigger.get("reasons", [])),
-        confidence=ranked[0].confidence,
+        confidence=max(ranked[0].confidence, float((correlated_situation or {}).get("confidence") or 0.0)),
         risk_level=risk_label(ranked),
         policy_flags=flags,
         evidence=evidence,
@@ -79,6 +92,7 @@ def create_decision_proposal_from_observation(
             "mission_pack_name": pack.get("name"),
             "trigger": trigger,
             "entity_id": tracking.get("entity_id"),
+            "correlated_situation": correlated_situation,
         },
     )
     session.add(decision)
@@ -119,6 +133,7 @@ def create_decision_proposal_from_observation(
                 "recommended_option_id": records[0].id,
                 "trigger_reasons": trigger.get("reasons", []),
                 "policy_flags": flags,
+                "correlated_situation_id": (correlated_situation or {}).get("situation_id"),
             },
         )
     )
