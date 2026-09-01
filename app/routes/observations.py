@@ -1,16 +1,15 @@
 from fastapi import APIRouter, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlmodel import Session
 
 from app.models.observation import ObservationCreate
 from app.db.observations import insert_observation
 from app.db.tracking import associate_observation_to_entity
 from app.db.fusion import create_fusion_output_with_provenance
 from app.dependencies import get_db
-from app.models.db import Session as _unused  # type: ignore[attr-defined]
 from app.models.db import engine as decision_engine_db
 from app.services.decision_trigger import evaluate_decision_trigger
 from app.services.decision_workflow import create_decision_proposal_from_observation
-from sqlmodel import Session
 
 
 router = APIRouter(prefix="/api/v1/observations", tags=["observations"])
