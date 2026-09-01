@@ -14,6 +14,11 @@ from app.services.bc_infrastructure_import import (
     DEFAULT_VANCOUVER_ISLAND_BBOX,
     import_bc_infrastructure,
 )
+from app.services.canada_infrastructure_import import (
+    CanadaInfrastructureImportError,
+    import_nrn_major_roads,
+    national_infrastructure_coverage,
+)
 
 router = APIRouter(prefix="/infrastructure", tags=["infrastructure"])
 
@@ -24,6 +29,7 @@ PUBLIC_SOURCE_CATALOG = {
         "publisher": "Statistics Canada / GeoBase",
         "licence": "Open Government Licence - Canada",
         "dataset": "National Road Network (NRN)",
+        "coverage": "All provinces and territories",
     },
     "canada-national-railway-network": {
         "category": "transport",
@@ -31,6 +37,7 @@ PUBLIC_SOURCE_CATALOG = {
         "publisher": "Natural Resources Canada / Transport Canada / GeoBase",
         "licence": "Open Government Licence - Canada",
         "dataset": "National Railway Network (NRWN)",
+        "coverage": "Provincial and territorial packages",
     },
     "bc-public-railway-track-line": {
         "category": "transport",
@@ -67,6 +74,33 @@ class InfrastructureCreate(BaseModel):
 @router.get("/sources")
 def infrastructure_sources():
     return PUBLIC_SOURCE_CATALOG
+
+
+@router.get("/coverage/canada")
+def canada_coverage():
+    return national_infrastructure_coverage()
+
+
+@router.post("/canada/roads/import")
+async def import_canada_roads(
+    jurisdiction: str = Query(..., min_length=2, max_length=2, description="AB, BC, MB, NB, NL, NS, NT, NU, ON, PE, QC, SK, YT"),
+    bbox: Optional[str] = Query(default=None, description="Optional minLon,minLat,maxLon,maxLat"),
+    tenant_id: str = Query(default="default", min_length=1, max_length=128),
+    limit: int = Query(default=2000, ge=1, le=2000),
+    session: Session = Depends(get_session),
+):
+    try:
+        return await import_nrn_major_roads(
+            session=session,
+            jurisdiction=jurisdiction,
+            tenant_id=tenant_id,
+            bbox=bbox,
+            limit=limit,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except CanadaInfrastructureImportError as exc:
+        raise HTTPException(status_code=502, detail={"upstream": "Statistics Canada NRN", "error": str(exc)}) from exc
 
 
 @router.post("/bc/import")
