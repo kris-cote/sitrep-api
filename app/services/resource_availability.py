@@ -7,6 +7,7 @@ from typing import Any, Dict, Iterable, List, Optional
 from sqlmodel import Session, select
 
 from app.models.exposure import ExposureAsset
+from app.models.resource_allocation import ResponseResourceAllocation
 from app.models.resource_capability import ResponseResourceCapability
 from app.models.situation import SituationRecord
 
@@ -28,6 +29,8 @@ STATUS_FACTOR = {
     "unknown": 0.50,
 }
 
+ACTIVE_ALLOCATION_STATUSES = {"planned", "active"}
+
 
 def _haversine_km(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
     radius = 6371.0088
@@ -44,7 +47,7 @@ def _asset_score(asset: ExposureAsset, distance_km: float, radius_km: float) -> 
     return max(0.0, min(1.0, 0.60 * distance_factor + 0.40 * quality))
 
 
-def _capability_score(cap: ResponseResourceCapability) -> float:
+def _capability_score(cap: ResponseResourceCapability, committed_fraction: float = 0.0) -> float:
     now = datetime.now(timezone.utc)
     if cap.valid_from and cap.valid_from > now:
         return 0.0
@@ -57,7 +60,9 @@ def _capability_score(cap: ResponseResourceCapability) -> float:
         + 0.20 * float(cap.capacity_score)
         + 0.25 * float(cap.suitability_score)
     )
-    return max(0.0, min(1.0, intrinsic * status))
+    remaining_capacity = max(0.0, 1.0 - max(0.0, committed_fraction))
+    allocation_factor = 0.35 + 0.65 * remaining_capacity
+    return max(0.0, min(1.0, intrinsic * status * allocation_factor))
 
 
 def situation_resource_profile(
@@ -82,9 +87,17 @@ def situation_resource_profile(
     tenant = tenant_id or situation.tenant_id
     assets = list(session.exec(select(ExposureAsset).where(ExposureAsset.tenant_id == tenant)).all())
     capabilities = list(session.exec(select(ResponseResourceCapability).where(ResponseResourceCapability.tenant_id == tenant)).all())
+    allocations = list(session.exec(select(ResponseResourceAllocation).where(ResponseResourceAllocation.tenant_id == tenant)).all())
+
     caps_by_asset: Dict[str, List[ResponseResourceCapability]] = {}
     for cap in capabilities:
         caps_by_asset.setdefault(cap.exposure_asset_id, []).append(cap)
+
+    committed_by_capability: Dict[str, float] = {}
+    for allocation in allocations:
+        if allocation.status not in ACTIVE_ALLOCATION_STATUSES:
+            continue
+        committed_by_capability[allocation.capability_id] = committed_by_capability.get(allocation.capability_id, 0.0) + max(0.0, min(1.0, float(allocation.allocated_fraction)))
 
     nearby: List[Dict[str, Any]] = []
     for asset in assets:
@@ -99,7 +112,8 @@ def situation_resource_profile(
         if asset_caps:
             scored = []
             for cap in asset_caps:
-                score = _capability_score(cap)
+                committed = committed_by_capability.get(cap.id, 0.0)
+                score = _capability_score(cap, committed_fraction=committed)
                 scored.append(score)
                 cap_details.append({
                     "capability_id": cap.id,
@@ -107,6 +121,9 @@ def situation_resource_profile(
                     "name": cap.name,
                     "availability_status": cap.availability_status,
                     "capability_score": round(score, 4),
+                    "committed_fraction": round(committed, 4),
+                    "remaining_fraction": round(max(0.0, 1.0 - committed), 4),
+                    "overcommitted": committed > 1.000001,
                     "capabilities": cap.capabilities,
                     "capacity": cap.capacity,
                     "suitability": cap.suitability,
@@ -155,15 +172,17 @@ def situation_resource_profile(
         }
 
     capability_record_count = sum(len(item["capability_records"]) for item in nearby)
+    active_allocation_count = sum(1 for item in allocations if item.status in ACTIVE_ALLOCATION_STATUSES)
     overall_confidence = min(1.0, 0.25 + 0.05 * len(nearby) + 0.03 * capability_record_count) if nearby else 0.20
     return {
         "situation_id": situation_id,
         "radius_km": effective_radius,
         "resource_confidence": round(overall_confidence, 4),
         "capability_record_count": capability_record_count,
+        "active_allocation_count": active_allocation_count,
         "groups": groups,
         "nearby_resources": nearby[:50],
-        "note": "Capability records improve feasibility scoring; missing public/authorized capability data is not proof that a resource is unavailable.",
+        "note": "Feasibility accounts for capability, availability and current allocation pressure; missing public/authorized data is not proof that a resource is unavailable.",
     }
 
 
@@ -204,11 +223,12 @@ def apply_resource_profile_to_options(options: Iterable[Dict[str, Any]], profile
             "coverage_confidence": round(effective_confidence, 4),
             "nearby_count": int(group_info.get("count") or 0),
             "capability_record_count": int(profile.get("capability_record_count") or 0),
+            "active_allocation_count": int(profile.get("active_allocation_count") or 0),
             "top_resources": group_info.get("top_resources", [])[:3],
         }
         option["metadata"] = metadata
         rationale = list(option.get("rationale") or [])
-        rationale.append(f"resource_group={group}; capability_aware_availability={assessed:.2f}; coverage_confidence={effective_confidence:.2f}")
+        rationale.append(f"resource_group={group}; allocation_aware_availability={assessed:.2f}; coverage_confidence={effective_confidence:.2f}")
         option["rationale"] = rationale
         result.append(option)
     return result
