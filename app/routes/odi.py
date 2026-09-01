@@ -3,6 +3,7 @@ from sqlmodel import Session
 
 from app.models.db import get_session
 from app.services.statcan_odi_import import ODIImportError, import_odi, odi_catalog as service_catalog
+from app.services import statcan_odi_extensions  # noqa: F401  # registers remaining ODI categories
 
 router = APIRouter(prefix="/api/v1/connectors/canada/odi", tags=["canada-open-database-infrastructure"])
 
@@ -17,13 +18,13 @@ ODI_CATALOG = {
         "airports": {"target": "exposure", "asset_type": "airport", "importable": True},
         "telecommunications": {"target": "infrastructure", "category": "telecom", "importable": True},
         "potable_water": {"target": "infrastructure", "category": "water", "importable": True},
-        "oil_and_gas": {"target": "infrastructure", "category": "fuel", "importable": False},
-        "railways": {"target": "infrastructure", "category": "transport", "importable": False},
-        "ports_and_marinas": {"target": "exposure", "asset_type": "port", "importable": False},
-        "bridges_and_tunnels": {"target": "infrastructure", "category": "transport", "importable": False},
-        "low_carbon": {"target": "infrastructure", "category": "energy", "importable": False},
-        "solid_waste": {"target": "exposure", "asset_type": "waste_facility", "importable": False},
-        "wastewater_stormwater": {"target": "infrastructure", "category": "water", "importable": False},
+        "oil_and_gas": {"target": "infrastructure", "category": "fuel", "importable": True},
+        "railways": {"target": "infrastructure", "category": "transport", "importable": True},
+        "ports_and_marinas": {"target": "exposure", "asset_type": "port", "importable": True},
+        "bridges_and_tunnels": {"target": "infrastructure", "category": "transport", "importable": True},
+        "low_carbon": {"target": "infrastructure", "category": "energy", "importable": True},
+        "solid_waste": {"target": "exposure", "asset_type": "waste_facility", "importable": True},
+        "wastewater_stormwater": {"target": "infrastructure", "category": "water", "importable": True},
     },
     "policy": {
         "planning_context_only": True,
@@ -42,7 +43,7 @@ def odi_catalog():
 
 @router.post("/import")
 async def import_odi_category(
-    odi_type: str = Query(..., description="airports, electric_grid, telecommunications, potable_water"),
+    odi_type: str = Query(..., description="Any ODI v2 category key from /catalog"),
     jurisdiction: str | None = Query(default=None, min_length=2, max_length=2, description="Optional province/territory code"),
     bbox: str | None = Query(default=None, description="Optional minLon,minLat,maxLon,maxLat"),
     tenant_id: str = Query(default="default", min_length=1, max_length=128),
@@ -50,14 +51,7 @@ async def import_odi_category(
     session: Session = Depends(get_session),
 ):
     try:
-        return await import_odi(
-            session=session,
-            odi_type=odi_type,
-            tenant_id=tenant_id,
-            jurisdiction=jurisdiction,
-            bbox=bbox,
-            limit=limit,
-        )
+        return await import_odi(session=session, odi_type=odi_type, tenant_id=tenant_id, jurisdiction=jurisdiction, bbox=bbox, limit=limit)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except ODIImportError as exc:
