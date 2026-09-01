@@ -7,6 +7,7 @@ from sqlmodel import Session
 from app.models.decision import CourseOfAction, DecisionAudit, DecisionRecord
 from app.services.decision_engine import policy_flags, rank_courses_of_action, risk_label
 from app.services.mission_packs import build_candidate_options, get_mission_pack, select_mission_pack
+from app.services.resource_availability import apply_resource_profile_to_options, situation_resource_profile
 
 
 def create_decision_proposal_from_observation(
@@ -38,11 +39,20 @@ def create_decision_proposal_from_observation(
             option["urgency_score"] = max(float(option.get("urgency_score", 0.0)), situation_urgency)
             option.setdefault("metadata", {})["correlated_situation"] = correlated_situation
 
+    resource_profile: Optional[Dict[str, Any]] = None
+    correlated_id = (correlated_situation or {}).get("situation_id")
+    if correlated_id:
+        try:
+            resource_profile = situation_resource_profile(session=session, situation_id=str(correlated_id))
+            options = apply_resource_profile_to_options(options, resource_profile)
+        except ValueError:
+            resource_profile = None
+
     ranked = rank_courses_of_action(options, pack.get("weights"))
     flags = policy_flags(ranked)
 
     situation_id = str(
-        (correlated_situation or {}).get("situation_id")
+        correlated_id
         or fusion.get("fusion_output_id")
         or fusion.get("id")
         or tracking.get("entity_id")
@@ -76,6 +86,13 @@ def create_decision_proposal_from_observation(
     ]
     if correlated_situation:
         evidence.append({"type": "correlated_situation", **correlated_situation})
+    if resource_profile:
+        evidence.append({
+            "type": "response_resource_profile",
+            "resource_confidence": resource_profile.get("resource_confidence"),
+            "radius_km": resource_profile.get("radius_km"),
+            "groups": resource_profile.get("groups"),
+        })
 
     decision = DecisionRecord(
         mission_id=mission_id,
@@ -93,6 +110,7 @@ def create_decision_proposal_from_observation(
             "trigger": trigger,
             "entity_id": tracking.get("entity_id"),
             "correlated_situation": correlated_situation,
+            "response_resource_profile": resource_profile,
         },
     )
     session.add(decision)
@@ -133,7 +151,8 @@ def create_decision_proposal_from_observation(
                 "recommended_option_id": records[0].id,
                 "trigger_reasons": trigger.get("reasons", []),
                 "policy_flags": flags,
-                "correlated_situation_id": (correlated_situation or {}).get("situation_id"),
+                "correlated_situation_id": correlated_id,
+                "resource_availability_applied": bool(resource_profile),
             },
         )
     )
@@ -151,4 +170,5 @@ def create_decision_proposal_from_observation(
         "risk_level": decision.risk_level,
         "requires_human_authorization": decision.requires_human_authorization,
         "policy_flags": decision.policy_flags,
+        "resource_availability_applied": bool(resource_profile),
     }
