@@ -1,14 +1,18 @@
-# app/models/db.py
 from typing import Generator
 
-from sqlmodel import SQLModel, create_engine, Session
-from app.core.config import settings
+from sqlmodel import SQLModel, Session, create_engine
 
-engine = create_engine(str(settings.hub_db_url), echo=False)
+from app.core.database_url import sync_database_url
+
+
+engine = create_engine(sync_database_url(), echo=False)
 
 
 def init_db() -> None:
-    """Create tables if they don't exist."""
+    """Create SQLModel-managed tables if they do not already exist."""
+    # Import models before create_all so their metadata is registered.
+    from app.models import decision  # noqa: F401
+
     SQLModel.metadata.create_all(engine)
 
 
