@@ -20,7 +20,12 @@ from app.services.canada_infrastructure_import import (
     national_infrastructure_coverage,
 )
 from app.services.canada_rail_import import CanadaRailImportError, import_nrwn_rail
-from app.services.canada_utility_import import CanadaUtilityImportError, import_nb_utilities, utility_coverage
+from app.services.canada_utility_import import (
+    CanadaUtilityImportError,
+    import_nb_utilities,
+    import_on_utilities,
+    utility_coverage,
+)
 
 router = APIRouter(prefix="/infrastructure", tags=["infrastructure"])
 
@@ -30,6 +35,7 @@ PUBLIC_SOURCE_CATALOG = {
     "bc-public-railway-track-line": {"category": "transport", "subtype": "railway", "publisher": "Government of British Columbia", "dataset": "Railway Track Line"},
     "bc-transmission-lines": {"category": "electric", "subtype": "transmission_line", "publisher": "Government of British Columbia", "dataset": "BC Transmission Lines", "note": "SitRep importer deliberately excludes voltage attributes from the operational copy."},
     "nb-utilities": {"category": "utility", "subtype": "mixed", "publisher": "Government of New Brunswick", "dataset": "Utilities", "coverage": "Major pipelines and power lines", "licence": "Open Government Licence - New Brunswick"},
+    "on-utility-line": {"category": "utility", "subtype": "mixed", "publisher": "Government of Ontario / Land Information Ontario", "dataset": "Utility Line", "coverage": "Power, water, communications and heating fuel", "licence": "Open Government Licence - Ontario", "note": "Historical linework retained as planning context with freshness warning."},
 }
 
 
@@ -90,6 +96,21 @@ async def import_new_brunswick_utilities(tenant_id: str = Query(default="default
         return await import_nb_utilities(session=session, tenant_id=tenant_id, limit=limit)
     except CanadaUtilityImportError as exc:
         raise HTTPException(status_code=502, detail={"upstream": "Government of New Brunswick Utilities", "error": str(exc)}) from exc
+
+
+@router.post("/canada/utilities/on/import")
+async def import_ontario_utilities(
+    bbox: Optional[str] = Query(default=None, description="Optional minLon,minLat,maxLon,maxLat"),
+    tenant_id: str = Query(default="default"),
+    limit: int = Query(default=5000, ge=1, le=5000),
+    session: Session = Depends(get_session),
+):
+    try:
+        return await import_on_utilities(session=session, tenant_id=tenant_id, bbox=bbox, limit=limit)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except CanadaUtilityImportError as exc:
+        raise HTTPException(status_code=502, detail={"upstream": "Ontario Utility Line / Land Information Ontario", "error": str(exc)}) from exc
 
 
 @router.post("/bc/import")
