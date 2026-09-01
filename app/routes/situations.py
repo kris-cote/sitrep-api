@@ -5,6 +5,7 @@ from app.models.db import get_session
 from app.models.situation import SituationAudit, SituationRecord
 from app.services.exposure_enrichment import enrich_situation_exposure
 from app.services.wildfire_projection import wildfire_exposure_screen
+from app.services.situation_impact import analyze_situation_infrastructure_impact
 
 
 router = APIRouter(prefix="/situations", tags=["situations"])
@@ -43,6 +44,27 @@ def enrich_exposure(
 ):
     try:
         return enrich_situation_exposure(session=session, situation_id=situation_id, radius_km=radius_km)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@router.post("/{situation_id}/enrich/infrastructure-impact")
+def infrastructure_impact(
+    situation_id: str,
+    radius_km: float | None = Query(default=None, gt=0, le=500),
+    max_depth: int = Query(default=4, ge=1, le=10),
+    categories: str | None = Query(default=None, description="Optional comma-separated categories such as transport,electric"),
+    session: Session = Depends(get_session),
+):
+    parsed_categories = [item.strip() for item in categories.split(",") if item.strip()] if categories else None
+    try:
+        return analyze_situation_infrastructure_impact(
+            session=session,
+            situation_id=situation_id,
+            radius_km=radius_km,
+            max_depth=max_depth,
+            categories=parsed_categories,
+        )
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 
