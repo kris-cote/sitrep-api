@@ -9,6 +9,11 @@ from sqlmodel import Session, select
 
 from app.models.db import get_session
 from app.models.infrastructure import InfrastructureFeature
+from app.services.bc_infrastructure_import import (
+    BCInfrastructureImportError,
+    DEFAULT_VANCOUVER_ISLAND_BBOX,
+    import_bc_infrastructure,
+)
 
 router = APIRouter(prefix="/infrastructure", tags=["infrastructure"])
 
@@ -16,7 +21,7 @@ PUBLIC_SOURCE_CATALOG = {
     "canada-national-road-network": {
         "category": "transport",
         "subtype": "road",
-        "publisher": "Natural Resources Canada / GeoBase",
+        "publisher": "Statistics Canada / GeoBase",
         "licence": "Open Government Licence - Canada",
         "dataset": "National Road Network (NRN)",
     },
@@ -27,12 +32,18 @@ PUBLIC_SOURCE_CATALOG = {
         "licence": "Open Government Licence - Canada",
         "dataset": "National Railway Network (NRWN)",
     },
+    "bc-public-railway-track-line": {
+        "category": "transport",
+        "subtype": "railway",
+        "publisher": "Government of British Columbia",
+        "dataset": "Railway Track Line",
+    },
     "bc-transmission-lines": {
         "category": "electric",
         "subtype": "transmission_line",
         "publisher": "Government of British Columbia",
         "dataset": "BC Transmission Lines",
-        "note": "Public dataset omits voltage information under the publication agreement.",
+        "note": "SitRep importer deliberately excludes voltage attributes from the operational copy.",
     },
 }
 
@@ -56,6 +67,29 @@ class InfrastructureCreate(BaseModel):
 @router.get("/sources")
 def infrastructure_sources():
     return PUBLIC_SOURCE_CATALOG
+
+
+@router.post("/bc/import")
+async def import_bc_public_infrastructure(
+    datasets: str = Query(default="roads,rail,transmission", description="Comma-separated: roads,rail,transmission"),
+    bbox: str = Query(default=DEFAULT_VANCOUVER_ISLAND_BBOX, description="minLon,minLat,maxLon,maxLat; defaults to Vancouver Island region"),
+    tenant_id: str = Query(default="default", min_length=1, max_length=128),
+    limit_per_dataset: int = Query(default=1000, ge=1, le=1000),
+    session: Session = Depends(get_session),
+):
+    keys = [item.strip() for item in datasets.split(",") if item.strip()]
+    try:
+        return await import_bc_infrastructure(
+            session=session,
+            datasets=keys,
+            tenant_id=tenant_id,
+            bbox=bbox,
+            limit_per_dataset=limit_per_dataset,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except BCInfrastructureImportError as exc:
+        raise HTTPException(status_code=502, detail={"upstream": "BC DataBC ArcGIS", "error": str(exc)}) from exc
 
 
 @router.post("", status_code=201)
