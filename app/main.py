@@ -17,13 +17,14 @@ from app.routes.canadian_connectors import router as canadian_connectors_router
 from app.routes.canadian_exposures import router as canadian_exposures_router
 from app.routes.situations import router as situations_router
 from app.routes.exposures import router as exposures_router
+from app.routes.infrastructure import router as infrastructure_router
 from prometheus_fastapi_instrumentator import Instrumentator
 from app.routes import compliance
 
 app = FastAPI(
     title="SitRep Decision Intelligence API",
-    version="2.6.0",
-    description="Unified situational awareness, fusion, cross-source correlation, authoritative BC exposure imports, live Canadian feed ingestion, mission packs and human-authorized decision intelligence",
+    version="2.7.0",
+    description="Unified situational awareness, cross-source correlation, population and wildfire exposure screening, Canadian infrastructure context, mission packs and human-authorized decision intelligence",
 )
 
 app.add_middleware(
@@ -60,6 +61,7 @@ app.include_router(canadian_connectors_router)
 app.include_router(canadian_exposures_router)
 app.include_router(situations_router)
 app.include_router(exposures_router)
+app.include_router(infrastructure_router)
 app.include_router(satellite_router, prefix="/api/v1/satellite", tags=["satellite"])
 app.include_router(readiness_router, prefix="/api/v1/readiness", tags=["readiness"])
 app.include_router(challenge_alignment_router)
