@@ -3,6 +3,7 @@ from sqlmodel import Session, select
 
 from app.models.db import get_session
 from app.models.situation import SituationAudit, SituationRecord
+from app.services.exposure_enrichment import enrich_situation_exposure
 
 
 router = APIRouter(prefix="/situations", tags=["situations"])
@@ -31,6 +32,18 @@ def get_situation(situation_id: str, session: Session = Depends(get_session)):
     if not situation:
         raise HTTPException(status_code=404, detail="Situation not found")
     return situation
+
+
+@router.post("/{situation_id}/enrich/exposure")
+def enrich_exposure(
+    situation_id: str,
+    radius_km: float | None = Query(default=None, gt=0, le=500),
+    session: Session = Depends(get_session),
+):
+    try:
+        return enrich_situation_exposure(session=session, situation_id=situation_id, radius_km=radius_km)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
 
 
 @router.get("/{situation_id}/audit")
