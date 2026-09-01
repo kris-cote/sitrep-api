@@ -19,6 +19,7 @@ from app.services.canada_infrastructure_import import (
     import_nrn_major_roads,
     national_infrastructure_coverage,
 )
+from app.services.canada_rail_import import CanadaRailImportError, import_nrwn_rail
 
 router = APIRouter(prefix="/infrastructure", tags=["infrastructure"])
 
@@ -90,17 +91,26 @@ async def import_canada_roads(
     session: Session = Depends(get_session),
 ):
     try:
-        return await import_nrn_major_roads(
-            session=session,
-            jurisdiction=jurisdiction,
-            tenant_id=tenant_id,
-            bbox=bbox,
-            limit=limit,
-        )
+        return await import_nrn_major_roads(session=session, jurisdiction=jurisdiction, tenant_id=tenant_id, bbox=bbox, limit=limit)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except CanadaInfrastructureImportError as exc:
         raise HTTPException(status_code=502, detail={"upstream": "Statistics Canada NRN", "error": str(exc)}) from exc
+
+
+@router.post("/canada/rail/import")
+async def import_canada_rail(
+    jurisdiction: str = Query(..., min_length=2, max_length=2, description="Province/territory code"),
+    tenant_id: str = Query(default="default", min_length=1, max_length=128),
+    limit: int = Query(default=5000, ge=1, le=5000),
+    session: Session = Depends(get_session),
+):
+    try:
+        return await import_nrwn_rail(session=session, jurisdiction=jurisdiction, tenant_id=tenant_id, limit=limit)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except CanadaRailImportError as exc:
+        raise HTTPException(status_code=502, detail={"upstream": "NRCan NRWN", "error": str(exc)}) from exc
 
 
 @router.post("/bc/import")
@@ -113,13 +123,7 @@ async def import_bc_public_infrastructure(
 ):
     keys = [item.strip() for item in datasets.split(",") if item.strip()]
     try:
-        return await import_bc_infrastructure(
-            session=session,
-            datasets=keys,
-            tenant_id=tenant_id,
-            bbox=bbox,
-            limit_per_dataset=limit_per_dataset,
-        )
+        return await import_bc_infrastructure(session=session, datasets=keys, tenant_id=tenant_id, bbox=bbox, limit_per_dataset=limit_per_dataset)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except BCInfrastructureImportError as exc:
@@ -129,11 +133,7 @@ async def import_bc_public_infrastructure(
 @router.post("", status_code=201)
 def create_infrastructure(payload: InfrastructureCreate, session: Session = Depends(get_session)):
     geometry_type = str(payload.geometry.get("type") or "Unknown")
-    item = InfrastructureFeature(
-        **payload.model_dump(),
-        geometry_type=geometry_type,
-        updated_at=datetime.now(timezone.utc),
-    )
+    item = InfrastructureFeature(**payload.model_dump(), geometry_type=geometry_type, updated_at=datetime.now(timezone.utc))
     session.add(item)
     session.commit()
     session.refresh(item)
