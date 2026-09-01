@@ -13,14 +13,15 @@ from app.routes.challenge_alignment import router as challenge_alignment_router
 from app.routes.provenance import router as provenance_router
 from app.routes.decisions import router as decisions_router
 from app.routes.mission_packs import router as mission_packs_router
+from app.routes.canadian_connectors import router as canadian_connectors_router
 # Optional: if you are exposing /metrics via prometheus_fastapi_instrumentator
 from prometheus_fastapi_instrumentator import Instrumentator
 from app.routes import compliance
 
 app = FastAPI(
     title="SitRep Decision Intelligence API",
-    version="2.1.0",
-    description="Unified situational awareness, fusion, provenance, mission packs and human-authorized decision intelligence",
+    version="2.2.0",
+    description="Unified situational awareness, fusion, provenance, Canadian public-data connectors, mission packs and human-authorized decision intelligence",
 )
 
 app.add_middleware(
@@ -55,6 +56,7 @@ app.include_router(provenance_router)
 app.include_router(model_router)
 app.include_router(decisions_router)
 app.include_router(mission_packs_router)
+app.include_router(canadian_connectors_router)
 app.include_router(satellite_router, prefix="/api/v1/satellite", tags=["satellite"])
 app.include_router(readiness_router, prefix="/api/v1/readiness", tags=["readiness"])
 app.include_router(challenge_alignment_router)
