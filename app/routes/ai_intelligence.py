@@ -18,6 +18,7 @@ from app.services.ai_intelligence import (
 )
 from app.services.ai_orchestration import ask_sitrep, generate_briefing
 from app.services.ai_provenance import set_operator_action
+from app.services.ai_tool_registry import tool_catalog
 
 router = APIRouter(prefix="/ai", tags=["ai-intelligence"])
 
@@ -55,6 +56,7 @@ class AskRequest(AIRequestBase):
     tenant_id: str = "default"
     situation_id: Optional[str] = None
     candidate_plan: Optional[Dict[str, Any]] = None
+    allow_mutating_tools: bool = False
 
 
 class BriefingRequest(AIRequestBase):
@@ -74,6 +76,18 @@ def list_ai_providers():
         "providers": provider_catalog(),
         "configuration_note": "Providers are configured by environment variables; secrets are never returned by this endpoint.",
         "supported_slots": ["openai", "canadian-ai", "local-ai"],
+    }
+
+
+@router.get("/tools")
+def list_ai_tools():
+    return {
+        "tools": tool_catalog(),
+        "policy": {
+            "read_only_tools_may_be_auto_invoked": True,
+            "mutating_tools_require_explicit_allow_mutating_tools": True,
+            "tool_results_are_deterministic_source_data": True,
+        },
     }
 
 
@@ -158,6 +172,7 @@ async def ask(payload: AskRequest, session: Session = Depends(get_session)):
             data_classification=payload.data_classification,
             preferred_provider=payload.preferred_provider,
             require_sovereign=payload.require_sovereign,
+            allow_mutating_tools=payload.allow_mutating_tools,
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
