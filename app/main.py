@@ -20,15 +20,16 @@ from app.routes.exposures import router as exposures_router
 from app.routes.infrastructure import router as infrastructure_router
 from app.routes.dependencies import router as dependencies_router
 from app.routes.emergency_infrastructure import router as emergency_infrastructure_router
+from app.routes.odi import router as odi_router
 from prometheus_fastapi_instrumentator import Instrumentator
 from app.routes import compliance
 
-app=FastAPI(title="SitRep Decision Intelligence API",version="3.4.0",description="Canada-wide decision intelligence with national roads, rail, communities, healthcare and population enrichment; provincial utility adapters; emergency-response infrastructure including Ontario AFFES and Quebec fire stations; cross-source correlation, infrastructure-impact and dependency-cascade analysis; mission packs and human authorization.")
+app=FastAPI(title="SitRep Decision Intelligence API",version="3.5.0",description="Canada-wide decision intelligence with national roads, rail, communities, healthcare and population enrichment; provincial utility and emergency-response infrastructure; resource-aware COA feasibility; Statistics Canada ODI planning-context catalogue; cross-source correlation, infrastructure-impact and dependency-cascade analysis; mission packs and human authorization.")
 app.add_middleware(CORSMiddleware,allow_origins=["*"],allow_credentials=False,allow_methods=["*"],allow_headers=["*"])
 Instrumentator().instrument(app).expose(app,endpoint="/metrics",include_in_schema=False)
 @app.on_event("startup")
 def on_startup(): init_db()
-for r in [core.router,tenants.router,missions.router,events.router,commands.router,agents.router,integrations.router,observations_router,entities_router,cop_router,demo_router,provenance_router,model_router,decisions_router,mission_packs_router,canadian_connectors_router,canadian_exposures_router,situations_router,exposures_router,infrastructure_router,dependencies_router,emergency_infrastructure_router]: app.include_router(r)
+for r in [core.router,tenants.router,missions.router,events.router,commands.router,agents.router,integrations.router,observations_router,entities_router,cop_router,demo_router,provenance_router,model_router,decisions_router,mission_packs_router,canadian_connectors_router,canadian_exposures_router,situations_router,exposures_router,infrastructure_router,dependencies_router,emergency_infrastructure_router,odi_router]: app.include_router(r)
 app.include_router(satellite_router,prefix="/api/v1/satellite",tags=["satellite"])
 app.include_router(readiness_router,prefix="/api/v1/readiness",tags=["readiness"])
 app.include_router(challenge_alignment_router)
