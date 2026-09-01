@@ -30,7 +30,7 @@ from app.routes.scenario_comparison import router as scenario_comparison_router
 from prometheus_fastapi_instrumentator import Instrumentator
 from app.routes import compliance
 
-app=FastAPI(title="SitRep Decision Intelligence API",version="4.2.0",description="Canada-wide decision intelligence with ranked side-by-side scenario planning, proposal-only what-if simulation, time-aware operational resource forecasting and pre-staging recommendations, multi-incident resource optimization, allocation-aware capabilities, live Statistics Canada ODI planning-context imports, national roads/rail/communities/healthcare/population, provincial utilities and emergency-response infrastructure, cross-source correlation, infrastructure-impact and dependency-cascade analysis, mission packs and human authorization.")
+app=FastAPI(title="SitRep Decision Intelligence API",version="4.3.0",description="Canada-wide decision intelligence with scenario branches promoted into formal auditable decision/COA records, ranked side-by-side scenario planning, proposal-only what-if simulation, time-aware operational resource forecasting and pre-staging recommendations, multi-incident resource optimization, allocation-aware capabilities, live Statistics Canada ODI planning-context imports, national roads/rail/communities/healthcare/population, provincial utilities and emergency-response infrastructure, cross-source correlation, infrastructure-impact and dependency-cascade analysis, mission packs and human authorization.")
 app.add_middleware(CORSMiddleware,allow_origins=["*"],allow_credentials=False,allow_methods=["*"],allow_headers=["*"])
 Instrumentator().instrument(app).expose(app,endpoint="/metrics",include_in_schema=False)
 @app.on_event("startup")
