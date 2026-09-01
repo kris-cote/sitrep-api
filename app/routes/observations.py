@@ -6,7 +6,11 @@ from app.db.observations import insert_observation
 from app.db.tracking import associate_observation_to_entity
 from app.db.fusion import create_fusion_output_with_provenance
 from app.dependencies import get_db
+from app.models.db import Session as _unused  # type: ignore[attr-defined]
+from app.models.db import engine as decision_engine_db
 from app.services.decision_trigger import evaluate_decision_trigger
+from app.services.decision_workflow import create_decision_proposal_from_observation
+from sqlmodel import Session
 
 
 router = APIRouter(prefix="/api/v1/observations", tags=["observations"])
@@ -48,10 +52,23 @@ async def create_observation(
         fusion=fusion_result,
     )
 
+    decision_proposal = None
+    if decision_trigger.get("should_trigger"):
+        with Session(decision_engine_db) as decision_session:
+            decision_proposal = create_decision_proposal_from_observation(
+                session=decision_session,
+                observation=observation_data,
+                tracking=tracking_result,
+                fusion=fusion_result,
+                trigger=decision_trigger,
+                mission_id=observation_data.get("mission_id"),
+            )
+
     return {
         "status": "ok",
         "observation_id": obs_id,
         **tracking_result,
         **fusion_result,
         "decision_trigger": decision_trigger,
+        "decision_proposal": decision_proposal,
     }
