@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import math
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List
 
 from sqlmodel import Session, select
 
@@ -29,15 +29,30 @@ def _situation_priority(s: SituationRecord) -> float:
 
 def _capability_group(cap: ResponseResourceCapability) -> str:
     text = " ".join([cap.resource_type or "", cap.name or "", " ".join(cap.capabilities or [])]).lower()
-    if any(x in text for x in ("helicopter", "aircraft", "aviation", "rotary", "fixed wing", "airbase")):
+    if any(x in text for x in ("helicopter", "aircraft", "aviation", "rotary", "fixed wing", "airbase", "tanker")):
         return "air"
     if any(x in text for x in ("fire", "suppression", "engine", "crew")):
         return "fire"
     if any(x in text for x in ("medical", "ambulance", "hospital", "medevac")):
         return "medical"
-    if any(x in text for x in ("shelter", "reception")):
+    if any(x in text for x in ("shelter", "reception", "evacuation")):
         return "shelter"
     return "general"
+
+
+def _desired_groups(s: SituationRecord) -> List[str]:
+    domain = (s.domain or "").lower()
+    text = " ".join([domain, s.title or "", s.summary or ""]).lower()
+    if "wildfire" in text or "wildland" in text or "fire" in text:
+        return ["fire", "air", "medical", "shelter"]
+    if any(x in text for x in ("flood", "earthquake", "storm", "disaster")):
+        return ["general", "medical", "shelter", "air"]
+    return ["general", "medical"]
+
+
+def _suggested_fraction(priority: float, group: str) -> float:
+    multiplier = {"fire": 1.0, "air": 0.72, "medical": 0.45, "shelter": 0.40, "general": 0.60}.get(group, 0.50)
+    return min(0.50, max(0.08, (0.20 + 0.35 * priority) * multiplier))
 
 
 def optimize_resource_plan(
@@ -69,12 +84,15 @@ def optimize_resource_plan(
     ranked_situations = sorted(situations, key=lambda s: (-_situation_priority(s), -float(s.urgency_score or 0.0), -float(s.risk_score or 0.0)))
     remaining = {c.id: max(0.0, 1.0 - committed.get(c.id, 0.0)) for c in caps}
     proposals: List[Dict[str, Any]] = []
+    response_packages: List[Dict[str, Any]] = []
     unmet: List[Dict[str, Any]] = []
 
     for s in ranked_situations:
+        priority = _situation_priority(s)
         if s.latitude is None or s.longitude is None:
-            unmet.append({"situation_id": s.id, "reason": "missing_geolocation", "priority_score": round(_situation_priority(s), 4)})
+            unmet.append({"situation_id": s.id, "reason": "missing_geolocation", "priority_score": round(priority, 4)})
             continue
+
         candidates: List[Dict[str, Any]] = []
         for cap in caps:
             asset = assets.get(cap.exposure_asset_id)
@@ -88,13 +106,7 @@ def optimize_resource_plan(
             distance_score = max(0.0, 1.0 - distance / max(max_distance_km, 1.0))
             status_score = STATUS_FACTOR.get((cap.availability_status or "unknown").lower(), 0.5)
             reassign_penalty = 0.20 if active_by_cap.get(cap.id) else 0.0
-            score = (
-                0.42 * _situation_priority(s)
-                + 0.28 * base_cap_score
-                + 0.18 * distance_score
-                + 0.12 * status_score
-                - reassign_penalty
-            )
+            score = 0.42 * priority + 0.28 * base_cap_score + 0.18 * distance_score + 0.12 * status_score - reassign_penalty
             candidates.append({
                 "capability_id": cap.id,
                 "exposure_asset_id": cap.exposure_asset_id,
@@ -110,42 +122,80 @@ def optimize_resource_plan(
             })
         candidates.sort(key=lambda x: (-x["candidate_score"], x["distance_km"]))
         candidates = candidates[:max_candidates_per_situation]
-        usable = [c for c in candidates if c["remaining_fraction"] > 0.0 and c["candidate_score"] > 0.15]
-        if not usable:
-            unmet.append({"situation_id": s.id, "reason": "no_suitable_remaining_capability", "priority_score": round(_situation_priority(s), 4), "candidates": candidates})
+
+        package_items: List[Dict[str, Any]] = []
+        missing_groups: List[str] = []
+        for group in _desired_groups(s):
+            usable = [c for c in candidates if c["resource_group"] == group and remaining.get(c["capability_id"], 0.0) > 0 and c["candidate_score"] > 0.15]
+            if not usable and group == "general":
+                usable = [c for c in candidates if remaining.get(c["capability_id"], 0.0) > 0 and c["candidate_score"] > 0.15]
+            if not usable:
+                missing_groups.append(group)
+                continue
+            best = usable[0]
+            available = remaining.get(best["capability_id"], 0.0)
+            allocated_fraction = min(available, _suggested_fraction(priority, group))
+            if allocated_fraction <= 0:
+                missing_groups.append(group)
+                continue
+            remaining[best["capability_id"]] = max(0.0, available - allocated_fraction)
+            item = {
+                "situation_id": s.id,
+                "situation_title": s.title,
+                "severity": s.severity,
+                "priority_score": round(priority, 4),
+                "capability_id": best["capability_id"],
+                "resource_name": best["resource_name"],
+                "resource_type": best["resource_type"],
+                "resource_group": group,
+                "distance_km": best["distance_km"],
+                "proposed_fraction": round(allocated_fraction, 4),
+                "candidate_score": best["candidate_score"],
+                "reassignment_required": best["reassignment_required"],
+                "active_assignments": best["active_assignments"],
+                "requires_human_authorization": True,
+            }
+            proposals.append(item)
+            package_items.append(item)
+
+        if not package_items:
+            unmet.append({"situation_id": s.id, "reason": "no_suitable_remaining_capability", "priority_score": round(priority, 4), "candidates": candidates})
             continue
-        best = usable[0]
-        suggested_fraction = min(0.50, max(0.10, 0.20 + 0.35 * _situation_priority(s)))
-        allocated_fraction = min(best["remaining_fraction"], suggested_fraction)
-        remaining[best["capability_id"]] = max(0.0, remaining[best["capability_id"]] - allocated_fraction)
-        proposals.append({
+
+        package_confidence = sum(x["candidate_score"] for x in package_items) / len(package_items)
+        coverage = len(package_items) / max(1, len(_desired_groups(s)))
+        package_score = max(0.0, min(1.0, 0.65 * package_confidence + 0.35 * coverage))
+        response_packages.append({
             "situation_id": s.id,
             "situation_title": s.title,
-            "severity": s.severity,
-            "priority_score": round(_situation_priority(s), 4),
-            "capability_id": best["capability_id"],
-            "resource_name": best["resource_name"],
-            "resource_type": best["resource_type"],
-            "distance_km": best["distance_km"],
-            "proposed_fraction": round(allocated_fraction, 4),
-            "candidate_score": best["candidate_score"],
-            "reassignment_required": best["reassignment_required"],
-            "active_assignments": best["active_assignments"],
-            "requires_human_authorization": True,
+            "priority_score": round(priority, 4),
+            "recommended_resources": package_items,
+            "missing_resource_groups": missing_groups,
+            "package_confidence": round(package_confidence, 4),
+            "package_score": round(package_score, 4),
+            "human_decision": "approve_modify_or_reject",
         })
+
+    competing_resources: Dict[str, List[str]] = {}
+    for p in proposals:
+        competing_resources.setdefault(p["capability_id"], []).append(p["situation_id"])
+    competing_resources = {k: sorted(set(v)) for k, v in competing_resources.items() if len(set(v)) > 1}
 
     return {
         "tenant_id": tenant_id,
         "active_situation_count": len(situations),
         "capability_count": len(caps),
         "active_allocation_count": sum(1 for a in allocations if a.status in ACTIVE_STATUSES),
+        "response_packages": response_packages,
         "proposals": proposals,
         "unmet_situations": unmet,
+        "competing_resources": competing_resources,
         "remaining_capacity": {k: round(v, 4) for k, v in remaining.items()},
         "policy": {
             "proposal_only": True,
             "human_authorization_required": True,
             "does_not_cancel_or_reassign_existing_allocations": True,
             "reassignment_penalty_applied": True,
+            "higher_priority_situations_consume_shared_capacity_first": True,
         },
     }
