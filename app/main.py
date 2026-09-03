@@ -31,7 +31,7 @@ from app.routes.ai_intelligence import router as ai_intelligence_router
 from prometheus_fastapi_instrumentator import Instrumentator
 from app.routes import compliance
 
-app=FastAPI(title="SitRep Decision Intelligence API",version="5.2.0",description="Canada-wide decision intelligence with safety-aware AI tool orchestration: AI can select and invoke deterministic SitRep read tools, preserve complete tool traces in provenance, gate state-mutating enrichment tools behind explicit permission, and synthesize evidence-backed analysis; plus unified AI ask, Briefing Agent, classification-aware provider routing, COA planning, red-team analysis, scenario planning, forecasting, resource optimization, infrastructure/exposure analysis and human authorization.")
+app=FastAPI(title="SitRep Decision Intelligence API",version="5.3.0",description="Canada-wide decision intelligence with complete situation lifecycle APIs, synthetic demo scenario creation, and safety-aware AI tool orchestration: AI can select and invoke deterministic SitRep read tools, preserve complete tool traces in provenance, gate state-mutating enrichment tools behind explicit permission, and synthesize evidence-backed analysis; plus unified AI ask, Briefing Agent, classification-aware provider routing, COA planning, red-team analysis, scenario planning, forecasting, resource optimization, infrastructure/exposure analysis and human authorization.")
 app.add_middleware(CORSMiddleware,allow_origins=["*"],allow_credentials=False,allow_methods=["*"],allow_headers=["*"])
 Instrumentator().instrument(app).expose(app,endpoint="/metrics",include_in_schema=False)
 @app.on_event("startup")
