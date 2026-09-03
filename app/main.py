@@ -16,6 +16,7 @@ from app.routes.mission_packs import router as mission_packs_router
 from app.routes.canadian_connectors import router as canadian_connectors_router
 from app.routes.canadian_exposures import router as canadian_exposures_router
 from app.routes.situations import router as situations_router
+from app.routes.competing_demo import router as competing_demo_router
 from app.routes.exposures import router as exposures_router
 from app.routes.infrastructure import router as infrastructure_router
 from app.routes.dependencies import router as dependencies_router
@@ -31,12 +32,12 @@ from app.routes.ai_intelligence import router as ai_intelligence_router
 from prometheus_fastapi_instrumentator import Instrumentator
 from app.routes import compliance
 
-app=FastAPI(title="SitRep Decision Intelligence API",version="5.3.0",description="Canada-wide decision intelligence with complete situation lifecycle APIs, synthetic demo scenario creation, and safety-aware AI tool orchestration: AI can select and invoke deterministic SitRep read tools, preserve complete tool traces in provenance, gate state-mutating enrichment tools behind explicit permission, and synthesize evidence-backed analysis; plus unified AI ask, Briefing Agent, classification-aware provider routing, COA planning, red-team analysis, scenario planning, forecasting, resource optimization, infrastructure/exposure analysis and human authorization.")
+app=FastAPI(title="SitRep Decision Intelligence API",version="5.4.0",description="Canada-wide decision intelligence with complete situation lifecycle APIs, synthetic competing-incident demos, multi-resource response-package optimization, and safety-aware AI tool orchestration: AI can select and invoke deterministic SitRep read tools, preserve complete tool traces in provenance, gate state-mutating enrichment tools behind explicit permission, and synthesize evidence-backed analysis; plus unified AI ask, Briefing Agent, classification-aware provider routing, COA planning, red-team analysis, scenario planning, forecasting, infrastructure/exposure analysis and human authorization.")
 app.add_middleware(CORSMiddleware,allow_origins=["*"],allow_credentials=False,allow_methods=["*"],allow_headers=["*"])
 Instrumentator().instrument(app).expose(app,endpoint="/metrics",include_in_schema=False)
 @app.on_event("startup")
 def on_startup(): init_db()
-for r in [core.router,tenants.router,missions.router,events.router,commands.router,agents.router,integrations.router,observations_router,entities_router,cop_router,demo_router,provenance_router,model_router,decisions_router,mission_packs_router,canadian_connectors_router,canadian_exposures_router,situations_router,exposures_router,infrastructure_router,dependencies_router,emergency_infrastructure_router,odi_router,resource_capabilities_router,resource_allocations_router,resource_optimizer_router,operational_forecast_router,scenario_simulation_router,scenario_comparison_router,ai_intelligence_router]: app.include_router(r)
+for r in [core.router,tenants.router,missions.router,events.router,commands.router,agents.router,integrations.router,observations_router,entities_router,cop_router,demo_router,provenance_router,model_router,decisions_router,mission_packs_router,canadian_connectors_router,canadian_exposures_router,situations_router,competing_demo_router,exposures_router,infrastructure_router,dependencies_router,emergency_infrastructure_router,odi_router,resource_capabilities_router,resource_allocations_router,resource_optimizer_router,operational_forecast_router,scenario_simulation_router,scenario_comparison_router,ai_intelligence_router]: app.include_router(r)
 app.include_router(satellite_router,prefix="/api/v1/satellite",tags=["satellite"])
 app.include_router(readiness_router,prefix="/api/v1/readiness",tags=["readiness"])
 app.include_router(challenge_alignment_router)
