@@ -6,6 +6,8 @@ from pydantic import BaseModel, Field
 from sqlmodel import Session, select
 
 from app.models.db import get_session
+from app.models.exposure import ExposureAsset
+from app.models.resource_capability import ResponseResourceCapability
 from app.models.situation import SituationAudit, SituationRecord
 from app.services.exposure_enrichment import enrich_situation_exposure
 from app.services.wildfire_projection import wildfire_exposure_screen
@@ -81,6 +83,62 @@ def _audit(session: Session, situation_id: str, action: str, note: str = "", pay
     ))
 
 
+def _demo_resource_specs(situation: SituationRecord) -> List[Dict[str, Any]]:
+    lat = float(situation.latitude or 49.1659)
+    lon = float(situation.longitude or -124.0558)
+    return [
+        {
+            "asset_type": "fire_station", "name": "SIM Fire Base Alpha", "lat": lat + 0.16, "lon": lon - 0.05,
+            "resource_type": "wildland_fire_crew", "capability_name": "SIM Initial Attack Crew Alpha",
+            "capabilities": ["wildland_suppression", "structure_protection", "initial_attack"],
+            "availability": "available", "availability_score": 0.95, "readiness": 0.92, "capacity": 0.82, "suitability": 0.94,
+            "capacity_detail": {"crews": 2, "personnel": 8},
+        },
+        {
+            "asset_type": "fire_station", "name": "SIM Fire Base Bravo", "lat": lat - 0.22, "lon": lon + 0.09,
+            "resource_type": "wildland_fire_crew", "capability_name": "SIM Sustained Action Crew Bravo",
+            "capabilities": ["wildland_suppression", "hose_lay", "structure_protection"],
+            "availability": "limited", "availability_score": 0.72, "readiness": 0.80, "capacity": 0.88, "suitability": 0.86,
+            "capacity_detail": {"crews": 3, "personnel": 12},
+        },
+        {
+            "asset_type": "heliport", "name": "SIM Rotary Wing Base", "lat": lat + 0.28, "lon": lon + 0.12,
+            "resource_type": "rotary_wing", "capability_name": "SIM Helicopter 01",
+            "capabilities": ["bucket_operations", "reconnaissance", "crew_transport"],
+            "availability": "available", "availability_score": 0.90, "readiness": 0.90, "capacity": 0.78, "suitability": 0.91,
+            "capacity_detail": {"aircraft": 1, "bucket_litres": 1400},
+        },
+        {
+            "asset_type": "airport", "name": "SIM Air Operations Base", "lat": lat - 0.36, "lon": lon - 0.18,
+            "resource_type": "fixed_wing", "capability_name": "SIM Air Tanker Package",
+            "capabilities": ["retardant_delivery", "aerial_reconnaissance"],
+            "availability": "limited", "availability_score": 0.68, "readiness": 0.76, "capacity": 0.90, "suitability": 0.84,
+            "capacity_detail": {"aircraft": 2},
+        },
+        {
+            "asset_type": "hospital", "name": "SIM Regional Medical Centre", "lat": lat - 0.18, "lon": lon + 0.22,
+            "resource_type": "medical_response", "capability_name": "SIM Medical Surge Team",
+            "capabilities": ["emergency_care", "burn_stabilization", "patient_reception"],
+            "availability": "available", "availability_score": 0.88, "readiness": 0.86, "capacity": 0.74, "suitability": 0.82,
+            "capacity_detail": {"surge_patients": 20},
+        },
+        {
+            "asset_type": "reception_centre", "name": "SIM Community Reception Centre", "lat": lat + 0.11, "lon": lon + 0.20,
+            "resource_type": "evacuation_support", "capability_name": "SIM Reception and Shelter Team",
+            "capabilities": ["registration", "temporary_shelter", "family_reunification"],
+            "availability": "available", "availability_score": 0.93, "readiness": 0.84, "capacity": 0.76, "suitability": 0.88,
+            "capacity_detail": {"people": 250},
+        },
+        {
+            "asset_type": "emergency_facility", "name": "SIM Logistics Staging Area", "lat": lat + 0.31, "lon": lon - 0.14,
+            "resource_type": "logistics", "capability_name": "SIM Heavy Equipment and Logistics Package",
+            "capabilities": ["heavy_equipment", "fuel_support", "supply_staging"],
+            "availability": "available", "availability_score": 0.86, "readiness": 0.80, "capacity": 0.92, "suitability": 0.83,
+            "capacity_detail": {"dozers": 2, "water_tenders": 3},
+        },
+    ]
+
+
 @router.post("", status_code=201)
 def create_situation(payload: SituationCreate, session: Session = Depends(get_session)):
     situation = SituationRecord(**payload.model_dump(), status="active")
@@ -94,10 +152,7 @@ def create_situation(payload: SituationCreate, session: Session = Depends(get_se
 
 @router.post("/demo/wildfire", status_code=201)
 def create_demo_wildfire(payload: DemoWildfireRequest, session: Session = Depends(get_session)):
-    """Create a non-live Vancouver Island wildfire situation for end-to-end testing.
-
-    Demo data is explicitly labelled simulated and must never be represented as a real incident.
-    """
+    """Create a non-live Vancouver Island wildfire situation for end-to-end testing."""
     situation = SituationRecord(
         tenant_id=payload.tenant_id,
         domain="wildfire",
@@ -142,16 +197,85 @@ def create_demo_wildfire(payload: DemoWildfireRequest, session: Session = Depend
     )
     session.add(situation)
     session.flush()
-    _audit(
-        session,
-        situation.id,
-        "demo_created",
-        "Synthetic wildfire training situation created",
-        {"simulation": True, "training_only": True},
-    )
+    _audit(session, situation.id, "demo_created", "Synthetic wildfire training situation created", {"simulation": True, "training_only": True})
     session.commit()
     session.refresh(situation)
     return situation
+
+
+@router.post("/{situation_id}/demo/resources", status_code=201)
+def seed_demo_resources(situation_id: str, session: Session = Depends(get_session)):
+    """Seed synthetic response resources around a simulated situation.
+
+    Only permitted for situations explicitly marked training_only/simulation.
+    Idempotent per situation through source_id naming.
+    """
+    situation = session.get(SituationRecord, situation_id)
+    if not situation:
+        raise HTTPException(status_code=404, detail="Situation not found")
+    context = situation.context or {}
+    if not context.get("simulation") or not context.get("training_only"):
+        raise HTTPException(status_code=400, detail="Demo resources may only be seeded into an explicit training simulation")
+    if situation.latitude is None or situation.longitude is None:
+        raise HTTPException(status_code=400, detail="Situation must have geolocation before demo resources can be seeded")
+
+    created_assets: List[ExposureAsset] = []
+    created_caps: List[ResponseResourceCapability] = []
+    for idx, spec in enumerate(_demo_resource_specs(situation), start=1):
+        source_id = f"demo-resource:{situation.id}:{idx}"
+        existing = session.exec(
+            select(ResponseResourceCapability)
+            .where(ResponseResourceCapability.tenant_id == situation.tenant_id)
+            .where(ResponseResourceCapability.source_id == source_id)
+        ).first()
+        if existing:
+            continue
+        asset = ExposureAsset(
+            tenant_id=situation.tenant_id,
+            asset_type=spec["asset_type"],
+            name=spec["name"],
+            latitude=spec["lat"],
+            longitude=spec["lon"],
+            criticality_score=0.72,
+            vulnerability_score=0.35,
+            source_system="sitrep-demo",
+            source_id=f"demo-asset:{situation.id}:{idx}",
+            properties={"simulation": True, "training_only": True, "situation_id": situation.id},
+        )
+        session.add(asset)
+        session.flush()
+        cap = ResponseResourceCapability(
+            tenant_id=situation.tenant_id,
+            exposure_asset_id=asset.id,
+            resource_type=spec["resource_type"],
+            name=spec["capability_name"],
+            availability_status=spec["availability"],
+            availability_score=spec["availability_score"],
+            readiness_score=spec["readiness"],
+            capacity_score=spec["capacity"],
+            suitability_score=spec["suitability"],
+            capabilities=spec["capabilities"],
+            capacity=spec["capacity_detail"],
+            suitability={"domains": ["wildfire"], "training_only": True},
+            constraints=["SIMULATED RESOURCE - NOT FOR OPERATIONAL DISPATCH"],
+            source_system="sitrep-demo",
+            source_id=source_id,
+            properties={"simulation": True, "training_only": True, "situation_id": situation.id},
+        )
+        session.add(cap)
+        created_assets.append(asset)
+        created_caps.append(cap)
+
+    _audit(session, situation.id, "demo_resources_seeded", "Synthetic response resources seeded", {"created": len(created_caps), "training_only": True})
+    session.commit()
+    return {
+        "situation_id": situation.id,
+        "created_resource_count": len(created_caps),
+        "created_asset_ids": [item.id for item in created_assets],
+        "created_capability_ids": [item.id for item in created_caps],
+        "training_only": True,
+        "note": "All seeded resources are synthetic and must never be treated as dispatchable real-world assets.",
+    }
 
 
 @router.get("")
@@ -180,11 +304,7 @@ def get_situation(situation_id: str, session: Session = Depends(get_session)):
 
 
 @router.patch("/{situation_id}")
-def update_situation(
-    situation_id: str,
-    payload: SituationUpdate,
-    session: Session = Depends(get_session),
-):
+def update_situation(situation_id: str, payload: SituationUpdate, session: Session = Depends(get_session)):
     situation = session.get(SituationRecord, situation_id)
     if not situation:
         raise HTTPException(status_code=404, detail="Situation not found")
@@ -204,11 +324,7 @@ def update_situation(
 
 
 @router.post("/{situation_id}/close")
-def close_situation(
-    situation_id: str,
-    payload: SituationStatusChange,
-    session: Session = Depends(get_session),
-):
+def close_situation(situation_id: str, payload: SituationStatusChange, session: Session = Depends(get_session)):
     situation = session.get(SituationRecord, situation_id)
     if not situation:
         raise HTTPException(status_code=404, detail="Situation not found")
@@ -222,11 +338,7 @@ def close_situation(
 
 
 @router.post("/{situation_id}/reopen")
-def reopen_situation(
-    situation_id: str,
-    payload: SituationStatusChange,
-    session: Session = Depends(get_session),
-):
+def reopen_situation(situation_id: str, payload: SituationStatusChange, session: Session = Depends(get_session)):
     situation = session.get(SituationRecord, situation_id)
     if not situation:
         raise HTTPException(status_code=404, detail="Situation not found")
@@ -240,11 +352,7 @@ def reopen_situation(
 
 
 @router.post("/{situation_id}/enrich/exposure")
-def enrich_exposure(
-    situation_id: str,
-    radius_km: float | None = Query(default=None, gt=0, le=500),
-    session: Session = Depends(get_session),
-):
+def enrich_exposure(situation_id: str, radius_km: float | None = Query(default=None, gt=0, le=500), session: Session = Depends(get_session)):
     try:
         return enrich_situation_exposure(session=session, situation_id=situation_id, radius_km=radius_km)
     except ValueError as exc:
@@ -261,13 +369,7 @@ def infrastructure_impact(
 ):
     parsed_categories = [item.strip() for item in categories.split(",") if item.strip()] if categories else None
     try:
-        return analyze_situation_infrastructure_impact(
-            session=session,
-            situation_id=situation_id,
-            radius_km=radius_km,
-            max_depth=max_depth,
-            categories=parsed_categories,
-        )
+        return analyze_situation_infrastructure_impact(session=session, situation_id=situation_id, radius_km=radius_km, max_depth=max_depth, categories=parsed_categories)
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 
@@ -280,12 +382,7 @@ def resource_availability(
     session: Session = Depends(get_session),
 ):
     try:
-        return situation_resource_profile(
-            session=session,
-            situation_id=situation_id,
-            radius_km=radius_km,
-            tenant_id=tenant_id,
-        )
+        return situation_resource_profile(session=session, situation_id=situation_id, radius_km=radius_km, tenant_id=tenant_id)
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 
@@ -300,14 +397,7 @@ def wildfire_screen(
     session: Session = Depends(get_session),
 ):
     try:
-        return wildfire_exposure_screen(
-            session=session,
-            situation_id=situation_id,
-            wind_from_deg=wind_from_deg,
-            wind_speed_kmh=wind_speed_kmh,
-            horizon_hours=horizon_hours,
-            tenant_id=tenant_id,
-        )
+        return wildfire_exposure_screen(session=session, situation_id=situation_id, wind_from_deg=wind_from_deg, wind_speed_kmh=wind_speed_kmh, horizon_hours=horizon_hours, tenant_id=tenant_id)
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 
@@ -316,9 +406,5 @@ def wildfire_screen(
 def get_situation_audit(situation_id: str, session: Session = Depends(get_session)):
     if not session.get(SituationRecord, situation_id):
         raise HTTPException(status_code=404, detail="Situation not found")
-    statement = (
-        select(SituationAudit)
-        .where(SituationAudit.situation_id == situation_id)
-        .order_by(SituationAudit.created_at)
-    )
+    statement = select(SituationAudit).where(SituationAudit.situation_id == situation_id).order_by(SituationAudit.created_at)
     return list(session.exec(statement).all())
