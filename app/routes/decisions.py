@@ -47,6 +47,13 @@ class DecisionActionRequest(BaseModel):
     note: str = ""
 
 
+class DecisionModifyRequest(BaseModel):
+    actor: str
+    note: str = ""
+    selected_option_id: Optional[str] = None
+    modifications: Dict[str, Any] = {}
+
+
 def _serialize(decision: DecisionRecord, options: List[CourseOfAction]) -> Dict[str, Any]:
     return {
         "id": decision.id,
@@ -192,7 +199,7 @@ def _change_status(decision_id: str, status: str, payload: DecisionActionRequest
     decision = session.get(DecisionRecord, decision_id)
     if not decision:
         raise HTTPException(status_code=404, detail="Decision not found")
-    if decision.status not in {"proposed", "approved", "rejected"}:
+    if decision.status not in {"proposed", "modified", "approved", "rejected"}:
         raise HTTPException(status_code=409, detail=f"Decision cannot transition from {decision.status}")
 
     now = datetime.now(timezone.utc)
@@ -215,6 +222,60 @@ def _change_status(decision_id: str, status: str, payload: DecisionActionRequest
 @router.post("/{decision_id}/approve")
 def approve_decision(decision_id: str, payload: DecisionActionRequest, session: Session = Depends(get_session)):
     return _change_status(decision_id, "approved", payload, session)
+
+
+@router.post("/{decision_id}/modify")
+def modify_decision(decision_id: str, payload: DecisionModifyRequest, session: Session = Depends(get_session)):
+    decision = session.get(DecisionRecord, decision_id)
+    if not decision:
+        raise HTTPException(status_code=404, detail="Decision not found")
+    if decision.status not in {"proposed", "modified"}:
+        raise HTTPException(status_code=409, detail=f"Decision cannot be modified from {decision.status}")
+
+    if payload.selected_option_id:
+        option = session.get(CourseOfAction, payload.selected_option_id)
+        if not option or option.decision_id != decision.id:
+            raise HTTPException(status_code=400, detail="selected_option_id does not belong to this decision")
+        decision.recommended_option_id = option.id
+
+    context = dict(decision.context or {})
+    history = list(context.get("operator_modifications") or [])
+    history.append({
+        "actor": payload.actor,
+        "note": payload.note,
+        "selected_option_id": payload.selected_option_id,
+        "modifications": payload.modifications,
+        "at": datetime.now(timezone.utc).isoformat(),
+    })
+    context["operator_modifications"] = history
+    context["latest_operator_modification"] = payload.modifications
+
+    now = datetime.now(timezone.utc)
+    decision.context = context
+    decision.status = "modified"
+    decision.decided_at = None
+    decision.decided_by = None
+    decision.updated_at = now
+    session.add(decision)
+    session.add(DecisionAudit(
+        decision_id=decision.id,
+        action="modified",
+        actor=payload.actor,
+        note=payload.note,
+        payload={
+            "selected_option_id": payload.selected_option_id,
+            "modifications": payload.modifications,
+        },
+    ))
+    session.commit()
+    session.refresh(decision)
+    return {
+        "id": decision.id,
+        "status": decision.status,
+        "recommended_option_id": decision.recommended_option_id,
+        "requires_human_authorization": decision.requires_human_authorization,
+        "operator_modifications": history,
+    }
 
 
 @router.post("/{decision_id}/reject")
